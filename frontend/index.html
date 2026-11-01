@@ -3,127 +3,137 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CoqIde - [proof.v]</title>
+  <title>CoqIde - [proof.v] - Mini-Colosseum Research Harness</title>
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
   <div id="app-container">
-    <!-- Menu Bar (Authentic CoqIDE menus) -->
+    <!-- Functional Menu Bar -->
     <div class="menu-bar">
       <div class="menu-item" id="menu-file">
         File
         <div class="dropdown-menu">
-          <div class="dropdown-item" id="menu-new-run">New Run... <span>Ctrl+N</span></div>
-          <div class="dropdown-item" id="menu-open-history">Run History / Replay... <span>Ctrl+O</span></div>
+          <div class="dropdown-item" id="menu-new-run">New Run / Custom Problem... <span>Ctrl+N</span></div>
+          <div class="dropdown-item" id="menu-open-history">Run History & Offline Replay... <span>Ctrl+O</span></div>
           <div class="dropdown-divider"></div>
           <div class="dropdown-item" onclick="window.app.loadFixture('clean_success')">Load Fixture: Clean Success</div>
-          <div class="dropdown-item" onclick="window.app.loadFixture('section_retry')">Load Fixture: Section Retry</div>
+          <div class="dropdown-item" onclick="window.app.loadFixture('section_retry')">Load Fixture: Section Retry (HMED Record)</div>
           <div class="dropdown-item" onclick="window.app.loadFixture('re_exploration')">Load Fixture: Re-exploration</div>
           <div class="dropdown-divider"></div>
           <div class="dropdown-item" id="menu-export-latex">Export Proof as LaTeX (.tex)</div>
           <div class="dropdown-item" id="menu-export-json">Export Full Trace as JSON (.json)</div>
-          <div class="dropdown-item" onclick="window.app.exportDirect('hmed')">Export HMED Revision Traces (.jsonl)</div>
+          <div class="dropdown-item" onclick="window.app.exportDirect('hmed')">Export HMED Revision Records (.jsonl)</div>
+          <div class="dropdown-item" onclick="window.app.exportDirect('objections')">Export Unresolved Objections (.md)</div>
           <div class="dropdown-divider"></div>
           <div class="dropdown-item" onclick="window.close()">Quit</div>
         </div>
       </div>
-      <div class="menu-item">Edit</div>
-      <div class="menu-item" id="menu-navigation">
-        Navigation
+      <div class="menu-item" id="menu-execution">
+        Execution
         <div class="dropdown-menu">
-          <div class="dropdown-item" onclick="window.app.apiPost('/api/runs/step')">Forward One Step <span>Ctrl+Down</span></div>
-          <div class="dropdown-item" onclick="window.app.apiPost('/api/runs/pause')">Retract / Pause <span>Ctrl+Up</span></div>
-          <div class="dropdown-item" onclick="window.app.showModal('modal-run-setup')">Go to End (Solve All) <span>Ctrl+End</span></div>
-          <div class="dropdown-item" onclick="window.app.apiPost('/api/runs/stop')">Interrupt <span>Ctrl+C</span></div>
+          <div class="dropdown-item" onclick="window.app.handleRunAll()">Run Full Pipeline <span>Ctrl+R</span></div>
+          <div class="dropdown-item" onclick="window.app.apiPost('/api/runs/step')">Step Forward (One Node/Stage) <span>Ctrl+Down</span></div>
+          <div class="dropdown-item" onclick="window.app.apiPost('/api/runs/pause')">Pause Execution <span>Ctrl+Up</span></div>
+          <div class="dropdown-item" onclick="window.app.apiPost('/api/runs/stop')">Interrupt / Stop <span>Ctrl+C</span></div>
+          <div class="dropdown-divider"></div>
+          <div class="dropdown-item" onclick="window.app.triggerReexplore()">Trigger Re-exploration Round <span>Ctrl+E</span></div>
         </div>
       </div>
-      <div class="menu-item">Try Tactics</div>
-      <div class="menu-item">Templates</div>
-      <div class="menu-item">Queries</div>
       <div class="menu-item" id="menu-display">
-        Display
+        View
         <div class="dropdown-menu">
           <div class="dropdown-item" onclick="window.app.switchTab('doc')">Proof Script (proof.v)</div>
-          <div class="dropdown-item" onclick="window.app.switchTab('tree')">Research Tree</div>
-          <div class="dropdown-item" onclick="window.app.switchTab('dag')">Proof DAG</div>
+          <div class="dropdown-item" onclick="window.app.switchTab('tree')">Research Tree View</div>
+          <div class="dropdown-item" onclick="window.app.switchTab('dag')">Proof DAG View</div>
           <div class="dropdown-divider"></div>
           <div class="dropdown-item" onclick="window.app.treeRenderer.fitToScreen()">Fit Research Tree</div>
           <div class="dropdown-item" onclick="window.app.dagRenderer.fitToScreen()">Fit Proof DAG</div>
         </div>
       </div>
-      <div class="menu-item" id="menu-compile">
-        Compile
+      <div class="menu-item" id="menu-tools">
+        Benchmark & Tools
         <div class="dropdown-menu">
-          <div class="dropdown-item" onclick="window.app.triggerReexplore()">Re-explore Round</div>
-          <div class="dropdown-item" onclick="window.app.exportDirect('latex')">Compile to LaTeX</div>
-        </div>
-      </div>
-      <div class="menu-item">Windows</div>
-      <div class="menu-item" id="menu-help">
-        Help
-        <div class="dropdown-menu">
-          <div class="dropdown-item" id="menu-settings-btn" onclick="window.app.showModal('modal-settings')">Settings (Meta API Key & Models)...</div>
+          <div class="dropdown-item" onclick="window.app.runBenchmarkEval()">Run 5-Lemma Evaluation Benchmark</div>
+          <div class="dropdown-item" onclick="window.app.showModal('modal-settings')">API Settings (Meta Keys & Models)...</div>
           <div class="dropdown-divider"></div>
-          <div class="dropdown-item" id="menu-help-about">About Mini-Colosseum...</div>
+          <div class="dropdown-item" id="menu-help-about">About Mini-Colosseum v1.1...</div>
           <div class="dropdown-item" onclick="window.open('https://arxiv.org/abs/2609.15983', '_blank')">Stellar Colosseum Paper (arXiv)</div>
         </div>
       </div>
     </div>
 
-    <!-- Authentic CoqIDE Toolbar Icons -->
+    <!-- Highly Functional Toolbar: Zero Filler -->
     <div class="toolbar">
-      <!-- Save Icon -->
-      <button class="btn-tool" id="btn-export" title="Save Proof / Export Artifacts">
-        <span class="toolbar-icon" style="color: #2b579a;">💾</span>
+      <!-- Direct Pipeline Execution Controls -->
+      <button class="btn-tool primary-action" id="btn-run-all" onclick="window.app.handleRunAll()" title="Run Complete Pipeline">
+        <span style="color:#008800; font-size:12px;">▶</span> <strong>Run All</strong>
       </button>
-      <!-- Cut / Clear Icon -->
-      <button class="btn-tool" id="btn-stop" title="Interrupt / Stop">
-        <span class="toolbar-icon" style="color: #cc0000;">✖</span>
+      <button class="btn-tool" id="btn-step-fwd" onclick="window.app.apiPost('/api/runs/step')" title="Step Forward one node/stage">
+        <span style="color:#007700; font-size:12px;">⏭</span> Step
       </button>
-
-      <div class="toolbar-separator"></div>
-
-      <!-- Retract to Start -->
-      <button class="btn-tool" id="btn-retract-start" onclick="window.app.switchTab('tree')" title="View Exploration Tree">
-        <span class="toolbar-icon" style="color: #00aa00;">◀</span>
+      <button class="btn-tool" id="btn-pause-exec" onclick="window.app.apiPost('/api/runs/pause')" title="Pause live run">
+        <span style="color:#666600; font-size:11px;">⏸</span> Pause
       </button>
-      <!-- Step Back / Pause -->
-      <button class="btn-tool" id="btn-pause" title="Retract / Pause [Ctrl+Up]">
-        <span class="toolbar-icon" style="color: #00aa00;">▲</span>
+      <button class="btn-tool" id="btn-stop-exec" onclick="window.app.apiPost('/api/runs/stop')" title="Stop / Interrupt">
+        <span style="color:#cc0000; font-size:11px;">⏹</span> Stop
       </button>
-      <!-- Step Forward -->
-      <button class="btn-tool" id="btn-step" title="Step Forward / Evaluate [Ctrl+Down]">
-        <span class="toolbar-icon" style="color: #00aa00;">▼</span>
-      </button>
-      <!-- Run to Cursor -->
-      <button class="btn-tool" id="btn-run-cursor" onclick="window.app.switchTab('dag')" title="View Proof DAG">
-        <span class="toolbar-icon" style="color: #00aa00;">⤓</span>
-      </button>
-      <!-- Run All / Solve full proof -->
-      <button class="btn-tool" id="btn-run" title="Run All / Start Research Pipeline">
-        <span class="toolbar-icon" style="color: #00aa00;">⏬</span>
-      </button>
-      <!-- Stop Interrupt -->
-      <button class="btn-tool" onclick="window.app.apiPost('/api/runs/stop')" title="Interrupt Current Stage">
-        <span class="toolbar-icon" style="color: #cc0000;">🛑</span>
+      <button class="btn-tool" onclick="window.app.triggerReexplore()" title="Trigger Re-exploration round with critique feedback">
+        <span style="font-size:11px;">🔄</span> Re-explore
       </button>
 
       <div class="toolbar-separator"></div>
 
-      <!-- New Run / Problem -->
-      <button class="btn-tool" id="btn-new-run" title="New Problem / Run Setup">
-        <span class="toolbar-icon">➕</span>
+      <!-- Problem Selector Dropdown Directly in Toolbar -->
+      <span class="toolbar-label">Problem:</span>
+      <select id="inline-problem-select" class="toolbar-select" style="max-width: 260px;" title="Select theorem to solve">
+        <option value="erdos_szekeres">Erdős-Szekeres Theorem (Monotonic Subsequences)</option>
+        <option value="oddtown">The Oddtown Theorem (Berlekamp 1969, F_2 vectors)</option>
+        <option value="ramsey_k6">Ramsey Number R(3, 3) = 6 (Triangle in K_6)</option>
+        <option value="mantel">Mantel's Theorem (Triangle-Free Graph Bound)</option>
+        <option value="girth5_indset">Planar Graph (Girth >= 5) Independent Set Bound</option>
+        <option value="custom">-- Custom Theorem (Edit in proof.v) --</option>
+      </select>
+
+      <!-- Preset Selector -->
+      <span class="toolbar-label">Preset:</span>
+      <select id="inline-preset-select" class="toolbar-select" title="Contraction tree size and k sampling">
+        <option value="Hackathon-v1.1">v1.1 (9-6-3-1, k=4)</option>
+        <option value="Small">Small (4-2-1, k=3)</option>
+        <option value="Medium">Medium (8-4-2-1, k=3)</option>
+        <option value="Paper">Paper Scale (16-8-4-1, k=5)</option>
+      </select>
+
+      <div class="toolbar-separator"></div>
+
+      <!-- Instant View Switcher Buttons -->
+      <button class="btn-tool" id="btn-view-doc" onclick="window.app.switchTab('doc')" title="View Proof Script (proof.v)">
+        <strong>📄 Script</strong>
       </button>
-      <!-- History -->
-      <button class="btn-tool" id="btn-history" title="Past Runs & Offline Replay">
-        <span class="toolbar-icon">📂</span>
+      <button class="btn-tool" id="btn-view-tree" onclick="window.app.switchTab('tree')" title="View Research Tree">
+        <strong>🌲 Tree</strong>
       </button>
-      <!-- Settings -->
-      <button class="btn-tool" onclick="window.app.showModal('modal-settings')" title="Settings & Meta API Key">
-        <span class="toolbar-icon">⚙</span>
+      <button class="btn-tool" id="btn-view-dag" onclick="window.app.switchTab('dag')" title="View Proof DAG">
+        <strong>📊 DAG</strong>
       </button>
 
-      <div class="problem-badge" id="badge-problem">Theorem: Erdős-Szekeres Monotonic Subsequence Bound</div>
+      <div class="toolbar-separator"></div>
+
+      <!-- Quick Export & Utilities -->
+      <button class="btn-tool" onclick="window.app.exportDirect('latex')" title="Export Proof as LaTeX (.tex)">
+        💾 .tex
+      </button>
+      <button class="btn-tool" onclick="window.app.exportDirect('json')" title="Export Full Trace (.json)">
+        💾 .json
+      </button>
+      <button class="btn-tool" onclick="window.app.exportDirect('hmed')" title="Export HMED Revision Records (.jsonl)">
+        ⚡ HMED
+      </button>
+      <button class="btn-tool" onclick="window.app.openRunHistoryModal()" title="Run History & Offline Replay">
+        📂 History
+      </button>
+      <button class="btn-tool" onclick="window.app.showModal('modal-settings')" title="Meta Model API Settings">
+        ⚙ Settings
+      </button>
     </div>
 
     <!-- Main Workspace -->
@@ -132,28 +142,30 @@
       <div class="pane left-pane" id="left-pane">
         <!-- Notebook Tab Bar -->
         <div class="tab-strip">
-          <div class="tab-btn active" data-tab="doc">
-            <span class="tab-doc-icon">📄</span>
+          <div class="tab-btn active" id="tab-btn-doc" data-tab="doc" onclick="window.app.switchTab('doc')">
+            <span style="color:#aa0000; font-size:11px;">📄</span>
             <span>proof.v</span>
           </div>
-          <div class="tab-btn" data-tab="tree">
+          <div class="tab-btn" id="tab-btn-tree" data-tab="tree" onclick="window.app.switchTab('tree')">
             <span class="tab-status-dot"></span>
             <span>Research Tree</span>
           </div>
-          <div class="tab-btn" data-tab="dag">
+          <div class="tab-btn" id="tab-btn-dag" data-tab="dag" onclick="window.app.switchTab('dag')">
             <span>Proof DAG</span>
-          </div>
-          <div class="tab-btn" onclick="window.app.loadDemoProblemQuick(1)">
-            <span>Examples.v</span>
           </div>
         </div>
 
         <!-- Sunken Frame containing active view -->
         <div class="sunken-frame">
-          <!-- Document / Coq Script View (with authentic Lime-Green highlight) -->
+          <!-- Document / Coq Script View with Gutter Line Numbers -->
           <div class="tab-content active" id="tab-doc">
-            <div class="coq-script-editor" id="document-content">
-              <!-- Rendered script with processed green region and LaTeX math -->
+            <div class="editor-layout">
+              <div class="gutter-lines" id="editor-gutter">
+                1<br>2<br>3<br>4<br>5<br>6<br>7<br>8<br>9<br>10<br>11<br>12<br>13<br>14<br>15<br>16<br>17<br>18<br>19<br>20<br>21<br>22
+              </div>
+              <div class="coq-script-editor" id="document-content" contenteditable="false">
+                <!-- Dynamically populated with evaluated green region & syntax highlighted proof -->
+              </div>
             </div>
           </div>
 
@@ -161,8 +173,8 @@
           <div class="tab-content" id="tab-tree">
             <div class="graph-viewport" id="tree-canvas-container"></div>
             <div class="graph-controls">
-              <button class="btn-graph-ctl" id="btn-fit-tree" title="Fit to Screen">Fit</button>
-              <button class="btn-graph-ctl" id="btn-reset-tree" title="Reset Zoom">1:1</button>
+              <button class="btn-graph-ctl" id="btn-fit-tree" onclick="window.app.treeRenderer.fitToScreen()" title="Fit to Screen">Fit</button>
+              <button class="btn-graph-ctl" id="btn-reset-tree" onclick="window.app.treeRenderer.resetZoom()" title="Reset Zoom">1:1</button>
             </div>
           </div>
 
@@ -170,53 +182,70 @@
           <div class="tab-content" id="tab-dag">
             <div class="graph-viewport" id="dag-canvas-container"></div>
             <div class="graph-controls">
-              <button class="btn-graph-ctl" id="btn-fit-dag" title="Fit to Screen">Fit</button>
-              <button class="btn-graph-ctl" id="btn-reset-dag" title="Reset Zoom">1:1</button>
+              <button class="btn-graph-ctl" id="btn-fit-dag" onclick="window.app.dagRenderer.fitToScreen()" title="Fit to Screen">Fit</button>
+              <button class="btn-graph-ctl" id="btn-reset-dag" onclick="window.app.dagRenderer.resetZoom()" title="Reset Zoom">1:1</button>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- Resizer Horizontal Divider with CoqIDE grip -->
+      <!-- Resizer Horizontal Divider with grip -->
       <div class="resizer-x" id="resizer-x"></div>
 
-      <!-- Right Pane: Subgoals (Top) and Messages (Bottom) -->
+      <!-- Right Pane: Subgoals & Goals Inspector (Top) and Messages & Event Log (Bottom) -->
       <div class="pane right-pane" id="right-pane">
-        <!-- Top Pane: Subgoals & Goals View -->
-        <div class="sunken-frame" id="inspector-container" style="flex: 1.2;">
+        <!-- Top Pane: Interactive Goals & Inspector -->
+        <div class="sunken-frame" id="inspector-container" style="flex: 1.25;">
+          <!-- Tabbed Inspector View -->
+          <div class="subgoal-tabs-bar">
+            <div class="subgoal-tab active" id="tab-insp-goals" onclick="window.app.switchInspectorTab('goals')">Subgoals (Coq Style)</div>
+            <div class="subgoal-tab" id="tab-insp-details" onclick="window.app.switchInspectorTab('details')">Node Details</div>
+            <div class="subgoal-tab" id="tab-insp-falsifier" onclick="window.app.switchInspectorTab('falsifier')">Falsifier Attack</div>
+            <div class="subgoal-tab" id="tab-insp-hmed" onclick="window.app.switchInspectorTab('hmed')">HMED Revisions</div>
+          </div>
+
           <div class="coq-goals-pane" id="coq-goals-container">
-            <div class="coq-goals-header" id="coq-subgoals-count">2 subgoals</div>
-            
-            <div class="coq-hypotheses" id="coq-hypotheses-text">
+            <!-- View 1: Active Subgoals (Matches Reference Image) -->
+            <div id="view-insp-goals">
+              <div class="coq-goals-header" id="coq-subgoals-count">2 subgoals</div>
+              
+              <div class="coq-hypotheses" id="coq-hypotheses-text">
 n : nat
 IHn : forall m : nat, {n = m} + {n &lt;&gt; m}
 m : nat
 Hm : n = m
-            </div>
-
-            <!-- CoqIDE Horizontal Subgoal line (1/2) -->
-            <div class="coq-subgoal-line">
-              <span class="coq-subgoal-tag" id="tag-subgoal-1">(1/2)</span>
-            </div>
-            <div class="coq-goal-target" id="target-subgoal-1">S m = S m</div>
-
-            <!-- CoqIDE Horizontal Subgoal line (2/2) -->
-            <div class="coq-subgoal-line">
-              <span class="coq-subgoal-tag" id="tag-subgoal-2">(2/2)</span>
-            </div>
-            <div class="coq-goal-target" id="target-subgoal-2">{S n = S m} + {S n &lt;&gt; S m}</div>
-
-            <!-- Detailed Inspector Fields (Hidden or shown when node is selected) -->
-            <div id="inspector-details" style="margin-top: 10px; font-size: 11px;">
-              <div class="coq-subgoal-line">
-                <span class="coq-subgoal-tag">(Falsifier Critique)</span>
               </div>
-              <div id="insp-falsifier-content" style="white-space: pre-wrap; color: #550000; padding: 4px 0;">No falsifier report attached.</div>
 
+              <!-- CoqIDE Horizontal Subgoal line (1/2) -->
               <div class="coq-subgoal-line">
-                <span class="coq-subgoal-tag">(Active Node Stats)</span>
+                <span class="coq-subgoal-tag" id="tag-subgoal-1">(1/2)</span>
               </div>
-              <div id="insp-meta-text" style="color: #333333; padding: 4px 0;">Select a node in Research Tree or Proof DAG to inspect provenance.</div>
+              <div class="coq-goal-target" id="target-subgoal-1" onclick="window.app.jumpToSubgoal(1)">S m = S m</div>
+
+              <!-- CoqIDE Horizontal Subgoal line (2/2) -->
+              <div class="coq-subgoal-line">
+                <span class="coq-subgoal-tag" id="tag-subgoal-2">(2/2)</span>
+              </div>
+              <div class="coq-goal-target" id="target-subgoal-2" onclick="window.app.jumpToSubgoal(2)">{S n = S m} + {S n &lt;&gt; S m}</div>
+            </div>
+
+            <!-- View 2: Node Details -->
+            <div id="view-insp-details" style="display: none;">
+              <div id="insp-meta-text" style="color: #000000; margin-bottom: 8px;"></div>
+              <div class="coq-subgoal-line"><span class="coq-subgoal-tag">(Prompt Summary)</span></div>
+              <pre id="insp-input-content" style="white-space: pre-wrap; font-size:11px; margin-bottom:8px;"></pre>
+              <div class="coq-subgoal-line"><span class="coq-subgoal-tag">(Structured Output)</span></div>
+              <pre id="insp-output-content" style="white-space: pre-wrap; font-size:11px;"></pre>
+            </div>
+
+            <!-- View 3: Falsifier Report -->
+            <div id="view-insp-falsifier" style="display: none;">
+              <div id="insp-falsifier-content" style="white-space: pre-wrap; color: #550000;">No falsifier report attached.</div>
+            </div>
+
+            <!-- View 4: HMED Revision Records -->
+            <div id="view-insp-hmed" style="display: none;">
+              <div id="insp-hmed-content" style="white-space: pre-wrap;">No revision records yet. When a section is rejected and retries, its (failed draft, critique, revised draft) tuple is stored here for Meta HMED distillation.</div>
             </div>
           </div>
         </div>
@@ -224,8 +253,21 @@ Hm : n = m
         <!-- Resizer Vertical Divider -->
         <div class="resizer-y" id="resizer-y"></div>
 
-        <!-- Bottom Pane: Messages & Log Stream -->
-        <div class="sunken-frame" style="flex: 0.8;">
+        <!-- Bottom Pane: Messages & Interactive Event Log -->
+        <div class="sunken-frame" style="flex: 0.75;">
+          <div class="messages-toolbar">
+            <span><strong>Console &amp; Execution Events</strong></span>
+            <div style="display: flex; gap: 4px; align-items: center;">
+              <label>Filter:</label>
+              <select id="log-filter-severity" class="toolbar-select" style="height: 18px; padding: 0 2px;">
+                <option value="all">All</option>
+                <option value="info">Info</option>
+                <option value="warning">Warnings</option>
+                <option value="error">Errors</option>
+              </select>
+              <button class="btn-tool" style="height: 18px; padding: 0 4px;" onclick="document.getElementById('event-log-stream').innerHTML=''">Clear</button>
+            </div>
+          </div>
           <div class="coq-messages-pane" id="event-log-stream">
             <div class="coq-msg-line">CoqIde started. Welcome to Mini-Colosseum Research Harness v1.1.</div>
             <div class="coq-msg-line">Ready in Predicate_Logic, proving theorem.</div>
@@ -237,65 +279,11 @@ Hm : n = m
     <!-- Authentic Sunken Status Bar -->
     <div class="status-bar">
       <div class="status-segment main" id="status-main-label">Ready in Predicate_Logic, proving nat_eq_dec</div>
+      <div class="status-segment" id="status-stage-label">Stage: READY</div>
       <div class="status-segment" id="status-calls">Calls: 0</div>
       <div class="status-segment" id="status-tokens">0k tok</div>
       <div class="status-segment" id="status-cost">$0.00 / $20.00</div>
-      <div class="status-segment" id="status-time">Line: 159 Char: 13</div>
       <div class="status-segment coqide-badge" id="status-connection">Coqide started</div>
-    </div>
-  </div>
-
-  <!-- Modal: Run Setup -->
-  <div class="modal-overlay" id="modal-run-setup">
-    <div class="modal-window">
-      <div class="modal-header">
-        <span>Run Setup | Mini-Colosseum</span>
-        <button class="btn-close-modal">&#10005;</button>
-      </div>
-      <div class="modal-content">
-        <div class="form-group">
-          <label class="form-label">Pre-tested Demo Problems:</label>
-          <select class="form-select" id="preset-problem-select">
-            <option value="">-- Choose a pre-tested problem lemma --</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
-            <label class="form-label" style="margin-bottom:0;">Problem Statement:</label>
-            <button class="btn-tool" id="btn-dictate" title="Dictate problem via Muse Voice Transcribe" style="padding: 1px 6px; height: 20px;">
-              &#127908; Dictate
-            </button>
-          </div>
-          <textarea class="form-textarea" id="input-problem" placeholder="Enter mathematical or TCS theorem statement...">Prove that every sequence of n^2 + 1 distinct real numbers contains a monotonic subsequence of length n + 1 (either strictly increasing or strictly decreasing).</textarea>
-        </div>
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-          <div class="form-group">
-            <label class="form-label">Size Preset:</label>
-            <select class="form-select" id="select-preset">
-              <option value="Hackathon-v1.1" selected>Hackathon v1.1 (widths [9, 6, 3, 1], k=4, ~75 calls)</option>
-              <option value="Small">Small (widths [4, 2, 1], k=3)</option>
-              <option value="Medium">Medium (widths [8, 4, 2, 1], k=3)</option>
-              <option value="Paper">Paper Scale (widths [16, 8, 4, 2, 1], k=5)</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Budget Cap (USD):</label>
-            <input class="form-input" id="input-budget" type="number" step="1.0" value="20.0">
-          </div>
-        </div>
-        <div class="form-group" style="margin-top: 4px;">
-          <label class="form-label" style="font-weight: normal;">
-            <input type="checkbox" id="checkbox-cross-model" checked> Cross-Model Adversarial Review (Solver: Spark, Falsifier: Wonder)
-          </label>
-          <label class="form-label" style="font-weight: normal; margin-top: 3px;">
-            <input type="checkbox" id="checkbox-force-retry"> Demonstrate Section 2 failure and automatic local retry (Generates HMED trace)
-          </label>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn-tool btn-close-modal">Cancel</button>
-        <button class="btn-tool" id="btn-start-run" style="font-weight: bold; background: #d2edd9;">Start Run</button>
-      </div>
     </div>
   </div>
 
@@ -303,17 +291,17 @@ Hm : n = m
   <div class="modal-overlay" id="modal-run-history">
     <div class="modal-window" style="width: 650px;">
       <div class="modal-header">
-        <span>Run History & Offline Replay</span>
-        <button class="btn-close-modal">&#10005;</button>
+        <span>Run History &amp; Offline Replay</span>
+        <button class="btn-close-modal" onclick="window.app.closeModals()">&#10005;</button>
       </div>
       <div class="modal-content">
         <div style="font-size: 11px; margin-bottom: 6px;">
-          Select any saved run to inspect its trace without calling any models:
+          Saved runs stored in SQLite. Select any run to replay and inspect offline:
         </div>
         <div id="history-runs-list" style="max-height: 260px; overflow-y: auto; background: #ffffff; border: 1px solid #706e68;"></div>
       </div>
       <div class="modal-footer">
-        <button class="btn-tool btn-close-modal">Close</button>
+        <button class="btn-tool btn-close-modal" onclick="window.app.closeModals()">Close</button>
       </div>
     </div>
   </div>
@@ -322,53 +310,32 @@ Hm : n = m
   <div class="modal-overlay" id="modal-settings">
     <div class="modal-window">
       <div class="modal-header">
-        <span>Settings | Meta Muse Models</span>
-        <button class="btn-close-modal">&#10005;</button>
+        <span>Settings | Meta Muse Configuration</span>
+        <button class="btn-close-modal" onclick="window.app.closeModals()">&#10005;</button>
       </div>
       <div class="modal-content">
         <div class="form-group">
           <label class="form-label">Meta Model API Key:</label>
           <input class="form-input" id="input-api-key" type="password" placeholder="Enter META_API_KEY (stored in keychain / session)">
-          <span style="font-size: 10px; color: #555;">Leave empty to use high-fidelity offline simulation mode.</span>
+          <span style="font-size: 10px; color: #555;">Leave blank to use high-fidelity offline simulation mode.</span>
         </div>
         <div class="form-group">
           <label class="form-label">API Base URL:</label>
           <input class="form-input" id="input-base-url" value="https://api.meta.ai/v1">
         </div>
+        <div class="form-group">
+          <label class="form-label">Budget Cap (USD):</label>
+          <input class="form-input" id="input-budget-cap" type="number" step="1.0" value="20.0">
+        </div>
+        <div class="form-group">
+          <label class="form-label" style="font-weight: normal;">
+            <input type="checkbox" id="setting-cross-model" checked> Cross-Model Adversarial Collaboration (Spark vs Wonder)
+          </label>
+        </div>
       </div>
       <div class="modal-footer">
-        <button class="btn-tool btn-close-modal">Cancel</button>
-        <button class="btn-tool" id="btn-save-settings" style="font-weight: bold;">Save</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Modal: Export Artifacts -->
-  <div class="modal-overlay" id="modal-export">
-    <div class="modal-window" style="width: 480px;">
-      <div class="modal-header">
-        <span>Export Proof & Run Artifacts</span>
-        <button class="btn-close-modal">&#10005;</button>
-      </div>
-      <div class="modal-content" style="display: flex; flex-direction: column; gap: 6px;">
-        <button class="btn-tool" onclick="window.app.exportDirect('latex')" style="padding: 6px 10px; justify-content: flex-start; height: auto;">
-          <strong>Export Proof as LaTeX (.tex)</strong> - Full mathematical document
-        </button>
-        <button class="btn-tool" onclick="window.app.exportDirect('json')" style="padding: 6px 10px; justify-content: flex-start; height: auto;">
-          <strong>Export Full Trace as JSON (.json)</strong> - Replayable graph trace & token costs
-        </button>
-        <button class="btn-tool" onclick="window.app.exportDirect('hmed')" style="padding: 6px 10px; justify-content: flex-start; height: auto;">
-          <strong>Export HMED Revision Records (.jsonl)</strong> - (attempt, critique, revision, outcome) for Meta HMED distillation
-        </button>
-        <button class="btn-tool" onclick="window.app.exportDirect('objections')" style="padding: 6px 10px; justify-content: flex-start; height: auto;">
-          <strong>Export Unresolved Objections (.md)</strong> - Falsifier critique report
-        </button>
-        <button class="btn-tool" onclick="window.app.exportDirect('knowledge')" style="padding: 6px 10px; justify-content: flex-start; height: auto;">
-          <strong>Export Curated Knowledge Directory (.json)</strong> - Invariant claims
-        </button>
-      </div>
-      <div class="modal-footer">
-        <button class="btn-tool btn-close-modal">Close</button>
+        <button class="btn-tool btn-close-modal" onclick="window.app.closeModals()">Cancel</button>
+        <button class="btn-tool" id="btn-save-settings" style="font-weight: bold;" onclick="window.app.handleSaveSettings()">Save</button>
       </div>
     </div>
   </div>

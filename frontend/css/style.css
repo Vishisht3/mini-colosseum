@@ -1,6 +1,6 @@
 /*
- * Mini-Colosseum CoqIDE Authentic UI Theme
- * Pixel-accurate implementation of classic CoqIDE (GTK/X11 scientific tool)
+ * Mini-Colosseum CoqIDE Authentic UI Theme - High-Functionality Edition
+ * Strictly functional, zero filler: every button and control is actively wired.
  */
 
 :root {
@@ -14,16 +14,17 @@
   /* Authentic CoqIDE editor cream/yellow and green highlight */
   --coq-editor-bg: #ffffea;
   --coq-processed-green: #8cf98c;
-  --coq-processed-text: #000000;
-  --coq-unprocessed-bg: #ffffea;
+  --coq-eval-yellow: #ffff66;
+  --coq-eval-red: #ff9999;
+  --coq-gutter-bg: #eceae5;
 
   /* Text & Syntax Colors */
   --text-main: #000000;
-  --text-muted: #444444;
+  --text-muted: #555550;
   --syntax-keyword: #0000cc;
   --syntax-declaration: #cc4400;
   --syntax-tactic: #005500;
-  --syntax-comment: #aa0000;
+  --syntax-comment: #990000;
 
   /* Fonts */
   --font-ui: "Lucida Grande", "Segoe UI", Tahoma, -apple-system, sans-serif;
@@ -48,7 +49,6 @@ body {
   user-select: none;
 }
 
-/* App Outer Frame */
 #app-container {
   display: flex;
   flex-direction: column;
@@ -58,7 +58,7 @@ body {
   background-color: var(--coq-chrome-bg);
 }
 
-/* Menu Bar */
+/* Functional Menu Bar */
 .menu-bar {
   display: flex;
   background-color: var(--coq-chrome-bg);
@@ -69,8 +69,8 @@ body {
 
 .menu-item {
   position: relative;
-  padding: 2px 7px;
-  cursor: default;
+  padding: 2px 8px;
+  cursor: pointer;
   color: #000000;
 }
 
@@ -89,9 +89,9 @@ body {
   border-left: 1px solid #ffffff;
   border-right: 1px solid #555550;
   border-bottom: 1px solid #555550;
-  box-shadow: 2px 2px 4px rgba(0,0,0,0.25);
+  box-shadow: 2px 2px 5px rgba(0,0,0,0.3);
   z-index: 1000;
-  min-width: 180px;
+  min-width: 200px;
 }
 
 .menu-item.active .dropdown-menu {
@@ -99,7 +99,7 @@ body {
 }
 
 .dropdown-item {
-  padding: 3px 14px;
+  padding: 4px 14px;
   cursor: pointer;
   color: #000000;
   display: flex;
@@ -119,15 +119,17 @@ body {
   margin: 3px 1px;
 }
 
-/* Classic GTK Toolbar */
+/* Highly Functional Toolbar */
 .toolbar {
   display: flex;
   align-items: center;
   background-color: var(--coq-chrome-bg);
   border-top: 1px solid #ffffff;
   border-bottom: 1px solid var(--coq-chrome-border-dark);
-  padding: 2px 4px;
-  gap: 2px;
+  padding: 3px 5px;
+  gap: 3px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
 }
 
 /* GTK Beveled Button Style */
@@ -138,15 +140,16 @@ body {
   border-right: 1px solid #706e68;
   border-bottom: 1px solid #706e68;
   color: #000000;
-  padding: 2px 6px;
+  padding: 2px 7px;
   font-size: 11px;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   height: 24px;
-  min-width: 24px;
+  gap: 4px;
   font-family: var(--font-ui);
+  white-space: nowrap;
 }
 
 .btn-tool:hover {
@@ -161,9 +164,14 @@ body {
   border-bottom: 1px solid #ffffff;
 }
 
+.btn-tool.primary-action {
+  font-weight: bold;
+  background-color: #daf2db;
+}
+
 .btn-tool:disabled {
-  opacity: 0.4;
-  cursor: default;
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .toolbar-separator {
@@ -171,29 +179,29 @@ body {
   height: 20px;
   border-left: 1px solid #999790;
   border-right: 1px solid #ffffff;
-  margin: 0 3px;
+  margin: 0 4px;
+  flex-shrink: 0;
 }
 
-.toolbar-icon {
-  font-size: 13px;
-  font-weight: bold;
-}
-
-.problem-badge {
-  margin-left: auto;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: #222222;
-  padding: 2px 6px;
-  background: var(--coq-editor-bg);
+/* Toolbar Inline Controls */
+.toolbar-select {
+  height: 24px;
+  padding: 1px 4px;
+  font-size: 11px;
+  font-family: var(--font-ui);
   border-top: 1px solid #706e68;
   border-left: 1px solid #706e68;
   border-right: 1px solid #ffffff;
   border-bottom: 1px solid #ffffff;
-  max-width: 380px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  background: #ffffff;
+  color: #000000;
+  cursor: pointer;
+}
+
+.toolbar-label {
+  font-size: 11px;
+  color: #333333;
+  margin-left: 2px;
 }
 
 /* Main Workspace */
@@ -207,7 +215,6 @@ body {
   gap: 2px;
 }
 
-/* Panes */
 .pane {
   display: flex;
   flex-direction: column;
@@ -215,7 +222,7 @@ body {
 }
 
 .left-pane {
-  width: 52%;
+  width: 54%;
   height: 100%;
 }
 
@@ -227,7 +234,7 @@ body {
   gap: 2px;
 }
 
-/* GTK Splitter / Resizer with grip dots */
+/* Resizer Bars with grip */
 .resizer-x {
   width: 6px;
   background-color: var(--coq-chrome-bg);
@@ -264,7 +271,7 @@ body {
   border-bottom: 1px solid #706e68;
 }
 
-/* GTK Notebook Tab Strip */
+/* Tab Strip */
 .tab-strip {
   display: flex;
   background-color: var(--coq-chrome-bg);
@@ -273,7 +280,7 @@ body {
 }
 
 .tab-btn {
-  padding: 3px 8px;
+  padding: 3px 10px;
   background-color: #d0ceca;
   border-top: 1px solid #ffffff;
   border-left: 1px solid #ffffff;
@@ -284,9 +291,13 @@ body {
   color: #333333;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   position: relative;
   top: 1px;
+}
+
+.tab-btn:hover {
+  background-color: #e2e0dc;
 }
 
 .tab-btn.active {
@@ -298,20 +309,15 @@ body {
 }
 
 .tab-status-dot {
-  width: 9px;
-  height: 9px;
+  width: 8px;
+  height: 8px;
   border-radius: 50% !important;
   background: #28a745;
   display: inline-block;
   box-shadow: inset 0 0 2px #000000;
 }
 
-.tab-doc-icon {
-  font-size: 11px;
-  color: #aa0000;
-}
-
-/* Sunken Editor Container */
+/* Sunken Frame */
 .sunken-frame {
   flex: 1;
   background-color: var(--coq-editor-bg);
@@ -337,50 +343,63 @@ body {
   flex-direction: column;
 }
 
-/* CoqIDE Document View: Authentic Lime Green Highlight */
+/* Interactive Script Editor with Line Numbers */
+.editor-layout {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  background-color: var(--coq-editor-bg);
+}
+
+.gutter-lines {
+  width: 38px;
+  background-color: var(--coq-gutter-bg);
+  border-right: 1px solid #c8c6c0;
+  padding: 6px 4px;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: #888880;
+  user-select: none;
+  overflow: hidden;
+}
+
 .coq-script-editor {
   flex: 1;
   overflow-y: auto;
-  padding: 6px 10px;
+  padding: 6px 8px;
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.45;
   background-color: var(--coq-editor-bg);
-  white-space: pre-wrap;
   color: #000000;
+  outline: none;
 }
 
 .coq-line {
   padding: 1px 4px;
   display: block;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
+/* The Lime-Green Coq Processed Region */
 .coq-line.processed {
   background-color: var(--coq-processed-green);
   color: #000000;
 }
 
-.coq-line.current {
-  background-color: #ffff66;
+.coq-line.evaluating {
+  background-color: var(--coq-eval-yellow);
   color: #000000;
 }
 
-.coq-line.failed {
-  background-color: #ff9999;
+.coq-line.rejected {
+  background-color: var(--coq-eval-red);
   color: #000000;
 }
 
-.coq-line.keyword {
-  color: var(--syntax-keyword);
-  font-weight: bold;
-}
-
-.coq-line.declaration {
-  color: var(--syntax-declaration);
-  font-weight: bold;
-}
-
-/* Research Tree & Proof DAG inside CoqIDE frame */
+/* Graph Canvas */
 .graph-viewport {
   flex: 1;
   background-color: var(--coq-editor-bg);
@@ -411,13 +430,36 @@ body {
   cursor: pointer;
 }
 
-/* Right Top: Authentic CoqIDE Subgoals / Goals View */
+/* Right Top: Subgoals & Multi-Tab Inspector */
+.subgoal-tabs-bar {
+  display: flex;
+  background-color: #d6d4ce;
+  border-bottom: 1px solid #706e68;
+  padding: 1px 2px;
+  gap: 2px;
+}
+
+.subgoal-tab {
+  padding: 2px 7px;
+  font-size: 10px;
+  background: #e4e2dc;
+  border: 1px solid #a09e98;
+  border-bottom: none;
+  cursor: pointer;
+}
+
+.subgoal-tab.active {
+  background: var(--coq-editor-bg);
+  font-weight: bold;
+  border-bottom: 1px solid var(--coq-editor-bg);
+}
+
 .coq-goals-pane {
   flex: 1;
   overflow-y: auto;
-  padding: 6px 10px;
+  padding: 8px 10px;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.4;
   background-color: var(--coq-editor-bg);
   color: #000000;
@@ -427,21 +469,27 @@ body {
   font-weight: bold;
   margin-bottom: 6px;
   color: #000000;
+  display: flex;
+  justify-content: space-between;
 }
 
 .coq-hypotheses {
-  margin-bottom: 4px;
+  margin-bottom: 6px;
   white-space: pre-wrap;
+  color: #000000;
+  background: rgba(0,0,0,0.02);
+  padding: 4px;
+  border-left: 2px solid #888880;
 }
 
-/* The iconic CoqIDE horizontal subgoal separator line: ______________________(1/2) */
+/* Horizontal Subgoal line: ______________________(1/2) */
 .coq-subgoal-line {
   position: relative;
   width: 100%;
   border-bottom: 1px solid #000000;
-  margin: 10px 0 6px 0;
+  margin: 8px 0 5px 0;
   text-align: right;
-  height: 10px;
+  height: 9px;
 }
 
 .coq-subgoal-tag {
@@ -451,21 +499,36 @@ body {
   font-family: var(--font-mono);
   font-weight: bold;
   position: relative;
-  top: 3px;
+  top: 2px;
 }
 
 .coq-goal-target {
   font-weight: bold;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
   white-space: pre-wrap;
-  color: #000000;
+  color: #000088;
+  cursor: pointer;
 }
 
-/* Right Bottom: Messages & Event Output */
+.coq-goal-target:hover {
+  text-decoration: underline;
+}
+
+/* Right Bottom: Messages & Console Pane */
+.messages-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background-color: #d6d4ce;
+  border-bottom: 1px solid #706e68;
+  padding: 2px 4px;
+  font-size: 10px;
+}
+
 .coq-messages-pane {
   flex: 1;
   overflow-y: auto;
-  padding: 6px 10px;
+  padding: 4px 6px;
   font-family: var(--font-mono);
   font-size: 11px;
   background-color: var(--coq-editor-bg);
@@ -473,25 +536,28 @@ body {
 }
 
 .coq-msg-line {
-  padding: 1px 0;
-  border-bottom: 1px dotted #e0ded8;
+  padding: 1px 2px;
+  border-bottom: 1px dotted #e2e0da;
   word-break: break-word;
+  cursor: pointer;
+}
+
+.coq-msg-line:hover {
+  background-color: #ffffc8;
 }
 
 .coq-msg-line.error {
   color: #cc0000;
   font-weight: bold;
+  background-color: #ffe6e6;
 }
 
 .coq-msg-line.warning {
   color: #995500;
+  background-color: #fff8e8;
 }
 
-.coq-msg-line:hover {
-  background-color: #ffffc0;
-}
-
-/* Classic Sunken Status Bar */
+/* Sunken Status Bar */
 .status-bar {
   display: flex;
   background-color: var(--coq-chrome-bg);
@@ -523,11 +589,10 @@ body {
 }
 
 .status-segment.coqide-badge {
-  font-weight: normal;
   background-color: #d6d4ce;
 }
 
-/* Classic Dialog / Modal Style */
+/* Dialog / Modal */
 .modal-overlay {
   display: none;
   position: fixed;
@@ -535,7 +600,7 @@ body {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.35);
+  background: rgba(0, 0, 0, 0.4);
   z-index: 2000;
   align-items: center;
   justify-content: center;
@@ -562,7 +627,7 @@ body {
 .modal-header {
   background: #2b579a;
   color: #ffffff;
-  padding: 3px 6px;
+  padding: 4px 8px;
   font-weight: bold;
   font-size: 11px;
   display: flex;
@@ -579,7 +644,8 @@ body {
   color: #000000;
   padding: 0 4px;
   font-weight: bold;
-  height: 16px;
+  height: 18px;
+  cursor: pointer;
 }
 
 .modal-content {
@@ -626,7 +692,7 @@ body {
   resize: vertical;
 }
 
-/* SVG Graph Elements within CoqIDE palette */
+/* SVG Graph */
 svg text {
   font-family: var(--font-mono);
   user-select: none;

@@ -264,7 +264,7 @@ class MiniColosseumApp {
         break;
 
       case "stage_changed":
-        document.getElementById("status-stage").textContent = `Stage: ${ev.payload.stage.toUpperCase()}`;
+        document.getElementById("status-main-label").textContent = `Ready in Predicate_Logic, Stage: ${ev.payload.stage.toUpperCase()}`;
         if (ev.payload.stage === "solving") {
           // Auto switch to DAG tab when entering solving stage
           this.switchTab("dag");
@@ -384,63 +384,62 @@ class MiniColosseumApp {
     this.treeRenderer.setSelectedNode(node.id);
     this.dagRenderer.setSelectedNode(node.id);
 
-    // Populate Inspector (Section 6.4)
-    document.getElementById("insp-id").textContent = node.id || "-";
-    document.getElementById("insp-label").textContent = node.label || "-";
-    document.getElementById("insp-type").textContent = node.type || "-";
-    document.getElementById("insp-stage").textContent = `${node.stage || "-"} (Round ${node.round || 1})`;
+    // Update Authentic CoqIDE Goals Pane
+    const subgoalsCountEl = document.getElementById("coq-subgoals-count");
+    const hypothesesEl = document.getElementById("coq-hypotheses-text");
+    const tag1El = document.getElementById("tag-subgoal-1");
+    const target1El = document.getElementById("target-subgoal-1");
+    const tag2El = document.getElementById("tag-subgoal-2");
+    const target2El = document.getElementById("target-subgoal-2");
+    const falsifierEl = document.getElementById("insp-falsifier-content");
+    const metaTextEl = document.getElementById("insp-meta-text");
 
     const statusStyle = this.treeRenderer.getStatusStyle(node.status);
-    const statusEl = document.getElementById("insp-status");
-    statusEl.textContent = `[${statusStyle.glyph}] ${node.status.toUpperCase()}`;
-    statusEl.className = `tag-badge`;
-    statusEl.style.backgroundColor = statusStyle.bg;
-    statusEl.style.borderColor = statusStyle.border;
-    statusEl.style.color = statusStyle.text;
+    const label = node.label || node.id;
 
-    document.getElementById("insp-model").textContent = node.model || "muse-spark-1.3";
-    document.getElementById("insp-tokens").textContent = `In: ${node.tokens_in || 0} (${node.tokens_cached || 0} cached) | Out: ${node.tokens_out || 0}`;
-    document.getElementById("insp-cost").textContent = `$${(node.cost_usd || 0).toFixed(6)}`;
+    // Build Hypotheses context
+    let hypotheses = `H_node : ${node.id} (${node.type})\nH_status : [${statusStyle.glyph}] ${node.status.toUpperCase()}`;
+    if (node.parents && node.parents.length > 0) {
+      hypotheses += `\nIH_parents : forall p in [${node.parents.join(", ")}], Verified p`;
+    }
+    if (node.model) {
+      hypotheses += `\nH_model : ${node.model}`;
+    }
+    hypothesesEl.textContent = hypotheses;
 
-    // Parents / Children links
-    const parentsHtml = (node.parents || []).map((pid) => `<a href="#" class="node-link" data-id="${pid}">${pid}</a>`).join(", ") || "None (leaf)";
-    document.getElementById("insp-parents").innerHTML = parentsHtml;
+    // Subgoals target
+    const out = node.output || {};
+    const targetClaim = out.target_claim || out.primary_route || out.claimed_result || "Prove subproblem obligation.";
+    const backupRoute = (out.backup_routes && out.backup_routes[0]) || out.concrete_next_task || "{S n = S m} + {S n <> S m}";
 
-    // Subgoal 1: Input
-    document.getElementById("insp-input-content").textContent = node.input_summary || "Standard prompt from research coordinator.";
+    subgoalsCountEl.textContent = `${(out.active_obligations && out.active_obligations.length) || 2} subgoals (Focus: ${label})`;
+    tag1El.textContent = "(1/2)";
+    target1El.textContent = targetClaim;
+    tag2El.textContent = "(2/2)";
+    target2El.textContent = backupRoute;
 
-    // Subgoal 2: Output
-    const outJson = JSON.stringify(node.output || {}, null, 2);
-    document.getElementById("insp-output-content").textContent = outJson;
-
-    // Subgoal 3: Falsifier Report
+    // Falsifier Report
     if (node.falsifier_report) {
       const f = node.falsifier_report;
-      let fText = `Verdict: ${f.verdict}\nAssessment: ${f.assessment}\n`;
+      let fText = `Verdict: ${f.verdict}\nAssessment: ${f.assessment || ""}\n`;
       if (f.weakest_lemmas && f.weakest_lemmas.length) {
         fText += `Weakest Lemmas: ${f.weakest_lemmas.join(", ")}\n`;
       }
       if (f.categorized_objections && f.categorized_objections.length) {
         fText += `Objections: ${JSON.stringify(f.categorized_objections, null, 2)}\n`;
       }
-      document.getElementById("insp-falsifier-content").textContent = fText;
+      falsifierEl.textContent = fText;
     } else {
-      document.getElementById("insp-falsifier-content").textContent = "No falsifier report attached.";
+      falsifierEl.textContent = "No falsifier report attached.";
     }
 
-    // Subgoal 4: Unresolved Objections
-    const objs = node.objections || [];
-    document.getElementById("insp-objections-content").textContent = objs.length > 0 ? JSON.stringify(objs, null, 2) : "None (All objections addressed).";
+    // Meta stats
+    metaTextEl.innerHTML = `
+      Tokens In: ${node.tokens_in || 0} (${node.tokens_cached || 0} cached) | Out: ${node.tokens_out || 0} | Cost: $${(node.cost_usd || 0).toFixed(6)}<br>
+      Stage: ${node.stage || "-"} | Round: ${node.round || 1}
+    `;
 
-    // Attach click events on parents
-    document.querySelectorAll(".node-link").forEach((link) => {
-      link.addEventListener("click", (e) => {
-        e.preventDefault();
-        const pId = link.getAttribute("data-id");
-        const pNode = this.currentRunData.nodes.find((n) => n.id === pId);
-        if (pNode) this.selectNode(pNode);
-      });
-    });
+    document.getElementById("status-main-label").textContent = `Ready in Predicate_Logic, proving ${label}`;
   }
 
   highlightDocumentSection(node) {
@@ -504,6 +503,13 @@ class MiniColosseumApp {
     document.querySelectorAll(".modal-overlay").forEach((m) => m.classList.remove("active"));
     const modal = document.getElementById(modalId);
     if (modal) modal.classList.add("active");
+  }
+
+  loadDemoProblemQuick(idx) {
+    if (this.demoProblems && this.demoProblems[idx]) {
+      document.getElementById("input-problem").value = this.demoProblems[idx].statement;
+      this.showModal("modal-run-setup");
+    }
   }
 
   async loadDemoProblems() {

@@ -1,7 +1,7 @@
 /**
- * Mini-Colosseum LaTeX Math & Document Renderer
- * Supports math expressions, theorem environments, section status tinting,
- * and margin annotations for defects.
+ * Mini-Colosseum CoqIDE Script & LaTeX Formatter
+ * Implements the authentic CoqIDE script view with lime-green evaluated regions,
+ * syntax highlighting, and subgoals display matching the reference screenshot.
  */
 
 class SimpleLaTeXRenderer {
@@ -14,9 +14,7 @@ class SimpleLaTeXRenderer {
       }
     }
 
-    // High quality offline fallback math renderer
     let s = latex.trim();
-    // Common Greek and math symbols
     const replacements = [
       [/\\alpha/g, "α"],
       [/\\beta/g, "β"],
@@ -38,103 +36,95 @@ class SimpleLaTeXRenderer {
       [/\\mapsto/g, "↦"],
       [/\\to/g, "→"],
       [/\\Rightarrow/g, "⇒"],
-      [/\\Leftrightarrow/g, "⇔"],
-      [/\\cap/g, "∩"],
-      [/\\cup/g, "∪"],
       [/\\mathbb\{R\}/g, "ℝ"],
       [/\\mathbb\{N\}/g, "ℕ"],
       [/\\mathbb\{Z\}/g, "ℤ"],
-      [/\\emptyset/g, "∅"],
-      [/\\circ/g, "∘"],
+      [/\\mathbb\{F\}_2/g, "𝔽₂"],
     ];
 
     replacements.forEach(([rgx, rep]) => {
       s = s.replace(rgx, rep);
     });
 
-    // Handle superscripts and subscripts
     s = s.replace(/\^\{([^}]+)\}/g, "<sup>$1</sup>");
     s = s.replace(/\^([0-9a-zA-Z])/g, "<sup>$1</sup>");
     s = s.replace(/_\{([^}]+)\}/g, "<sub>$1</sub>");
     s = s.replace(/_([0-9a-zA-Z])/g, "<sub>$1</sub>");
-
-    // Fractions \frac{a}{b} -> (a / b)
     s = s.replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, "($1 / $2)");
 
-    return `<span class="math-tex" style="font-family: 'Times New Roman', serif; font-style: italic; letter-spacing: 0.3px;">${s}</span>`;
+    return `<span class="math-tex" style="font-style: italic;">${s}</span>`;
   }
 
   static renderDocument(latexContent, sectionNodes = [], globalDefects = []) {
     if (!latexContent) {
-      return `<div style="color: #888880; font-style: italic; padding: 20px;">No proof document assembled yet.</div>`;
+      return `
+        <div class="coq-line declaration">Theorem mini_colosseum_spec : forall (statement : Prop), Proven statement.</div>
+        <div class="coq-line keyword">Proof.</div>
+        <div class="coq-line">  intro statement.</div>
+        <div class="coq-line" style="color:#777777;">  (* Awaiting research orchestrator initialization... *)</div>
+      `;
     }
 
-    // Split document into sections or parse sections
     const lines = latexContent.split("\n");
     let html = "";
-    let inSection = false;
-    let currentSectionIdx = 0;
-    let currentSectionTitle = "";
-    let currentSectionBody = "";
+    let currentSecIdx = 0;
+    let inEvaluatedRegion = true;
 
-    const flushSection = () => {
-      if (currentSectionIdx > 0 || currentSectionTitle) {
-        const secNode = sectionNodes.find(n => (n.output && n.output.section_index === currentSectionIdx) || n.label === `SEC_${currentSectionIdx}` || n.id === `SEC_${currentSectionIdx}`);
-        const status = secNode ? secNode.status : "pending";
-        const defects = globalDefects.filter(d => d.section_index === currentSectionIdx || d.using_section === currentSectionIdx);
-
-        let defectHtml = "";
-        defects.forEach(d => {
-          defectHtml += `
-            <div class="section-defect-margin">
-              <strong>[Global Verifier Defect - ${d.severity.toUpperCase()}]:</strong> ${d.description}
-              ${d.suggested_action ? `<br><em>Suggested Action:</em> ${d.suggested_action}` : ""}
-            </div>
-          `;
-        });
-
-        const statusClass = `status-${status}`;
-        html += `
-          <div class="document-section ${statusClass}" data-section-idx="${currentSectionIdx}">
-            <div class="section-header">
-              <span>Section ${currentSectionIdx}: ${currentSectionTitle}</span>
-              <span class="tag-badge">[${status.toUpperCase()}]</span>
-            </div>
-            <div class="section-body">${SimpleLaTeXRenderer.formatText(currentSectionBody)}</div>
-            ${defectHtml}
-          </div>
-        `;
-      }
-      currentSectionBody = "";
-    };
-
-    for (const line of lines) {
+    // Convert LaTeX structure into Coq script with lime green evaluation background
+    lines.forEach((line) => {
       const trimmed = line.trim();
+      if (!trimmed) {
+        html += `<div class="coq-line">&nbsp;</div>`;
+        return;
+      }
+
+      // Check for section headings
       const secMatch = trimmed.match(/^\\section\{([^}]+)\}/);
       if (secMatch) {
-        flushSection();
-        currentSectionIdx++;
-        currentSectionTitle = secMatch[1];
-        inSection = true;
-      } else if (trimmed.startsWith("\\title{") || trimmed.startsWith("\\documentclass") || trimmed.startsWith("\\maketitle") || trimmed.startsWith("\\begin{document}") || trimmed.startsWith("\\end{document}")) {
-        // Document metadata
-        if (trimmed.startsWith("\\title{")) {
-          const t = trimmed.replace("\\title{", "").replace("}", "");
-          html += `<div class="document-header"><div class="document-title">${t}</div></div>`;
-        }
-      } else if (trimmed.startsWith("%% SECTION_BODY_")) {
-        currentSectionBody += `\n<em style="color:#777770;">[Reserved placeholder for section ${currentSectionIdx} body - awaiting solver...]</em>\n`;
-      } else {
-        if (inSection) {
-          currentSectionBody += line + "\n";
-        }
-      }
-    }
-    flushSection();
+        currentSecIdx++;
+        const secNode = sectionNodes.find(
+          (n) => n.id === `SEC_${currentSecIdx}` || n.label === `SEC_${currentSecIdx}`
+        );
+        inEvaluatedRegion = secNode ? secNode.status === "accepted" : false;
 
-    if (!html) {
-      html = `<div class="document-section status-accepted"><div class="section-body">${SimpleLaTeXRenderer.formatText(latexContent)}</div></div>`;
-    }
+        const processedClass = inEvaluatedRegion ? "processed" : "";
+        html += `
+          <div class="coq-line declaration ${processedClass}" style="margin-top: 8px;">
+            <span style="color:#cc4400; font-weight:bold;">Lemma</span> section_${currentSecIdx} : <span style="color:#0000cc; font-weight:bold;">forall</span> (ctx : Context), Subproblem_${currentSecIdx}.
+          </div>
+          <div class="coq-line keyword ${processedClass}">Proof. (* ${secMatch[1]} *)</div>
+        `;
+        return;
+      }
+
+      // Placeholder for unproved section
+      if (trimmed.startsWith("%% SECTION_BODY_")) {
+        html += `
+          <div class="coq-line" style="color:#777770; font-style:italic;">
+            &nbsp;&nbsp;(* Section ${currentSecIdx} body pending solver execution... *)
+          </div>
+          <div class="coq-line keyword">Admitted.</div>
+        `;
+        return;
+      }
+
+      // Format line content
+      let lineText = SimpleLaTeXRenderer.formatText(line);
+
+      // Syntax highlight Coq keywords
+      lineText = lineText.replace(/\b(Proof|Qed|Defined|Theorem|Lemma|Definition|match|with|induction|destruct|reflexivity|intros|rewrite|apply|tauto|discriminate|left|right)\b/g, (m) => {
+        if (m === "Proof" || m === "Qed" || m === "Defined" || m === "match" || m === "with") {
+          return `<span style="color:#0000cc; font-weight:bold;">${m}</span>`;
+        }
+        if (m === "Theorem" || m === "Lemma" || m === "Definition") {
+          return `<span style="color:#cc4400; font-weight:bold;">${m}</span>`;
+        }
+        return `<span style="color:#000000;">${m}</span>`;
+      });
+
+      const processedClass = inEvaluatedRegion ? "processed" : "";
+      html += `<div class="coq-line ${processedClass}">${lineText}</div>`;
+    });
 
     return html;
   }
@@ -142,15 +132,8 @@ class SimpleLaTeXRenderer {
   static formatText(text) {
     if (!text) return "";
     let s = text;
-    // Render display math $$...$$
-    s = s.replace(/\$\$([^$]+)\$\$/g, (m, g1) => {
-      return `<div style="text-align: center; margin: 8px 0;">${SimpleLaTeXRenderer.renderMath(g1)}</div>`;
-    });
-    // Render inline math $...$
-    s = s.replace(/\$([^$]+)\$/g, (m, g1) => {
-      return SimpleLaTeXRenderer.renderMath(g1);
-    });
-    // LaTeX bold
+    s = s.replace(/\$\$([^$]+)\$\$/g, (m, g1) => SimpleLaTeXRenderer.renderMath(g1));
+    s = s.replace(/\$([^$]+)\$/g, (m, g1) => SimpleLaTeXRenderer.renderMath(g1));
     s = s.replace(/\\textbf\{([^}]+)\}/g, "<strong>$1</strong>");
     s = s.replace(/\\textit\{([^}]+)\}/g, "<em>$1</em>");
     return s;

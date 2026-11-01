@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local SQLite databases and run traces
+data/
+*.db
+*.sqlite3
+
+# Node & package build artifacts
+node_modules/
+dist/
+build/
+
+# OS artifacts
+.DS_Store
+Thumbs.db

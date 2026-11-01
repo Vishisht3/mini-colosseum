@@ -13,15 +13,15 @@
       <div class="menu-item" id="menu-file">
         File
         <div class="dropdown-menu">
-          <div class="dropdown-item" id="menu-new-run">New Run / Custom Problem... <span>Ctrl+N</span></div>
-          <div class="dropdown-item" id="menu-open-history">Run History & Offline Replay... <span>Ctrl+O</span></div>
+          <div class="dropdown-item" id="menu-new-run" onclick="window.app.showModal('modal-run-setup')">New Run / Custom Problem... <span>Ctrl+N</span></div>
+          <div class="dropdown-item" id="menu-open-history" onclick="window.app.openRunHistoryModal()">Run History &amp; Offline Replay... <span>Ctrl+O</span></div>
           <div class="dropdown-divider"></div>
           <div class="dropdown-item" onclick="window.app.loadFixture('clean_success')">Load Fixture: Clean Success</div>
           <div class="dropdown-item" onclick="window.app.loadFixture('section_retry')">Load Fixture: Section Retry (HMED Record)</div>
           <div class="dropdown-item" onclick="window.app.loadFixture('re_exploration')">Load Fixture: Re-exploration</div>
           <div class="dropdown-divider"></div>
-          <div class="dropdown-item" id="menu-export-latex">Export Proof as LaTeX (.tex)</div>
-          <div class="dropdown-item" id="menu-export-json">Export Full Trace as JSON (.json)</div>
+          <div class="dropdown-item" id="menu-export-latex" onclick="window.app.exportDirect('latex')">Export Proof as LaTeX (.tex)</div>
+          <div class="dropdown-item" id="menu-export-json" onclick="window.app.exportDirect('json')">Export Full Trace as JSON (.json)</div>
           <div class="dropdown-item" onclick="window.app.exportDirect('hmed')">Export HMED Revision Records (.jsonl)</div>
           <div class="dropdown-item" onclick="window.app.exportDirect('objections')">Export Unresolved Objections (.md)</div>
           <div class="dropdown-divider"></div>
@@ -140,37 +140,25 @@
     <div class="main-workspace">
       <!-- Left Pane: Coq Script / Tabs -->
       <div class="pane left-pane" id="left-pane">
-        <!-- Notebook Tab Bar -->
+        <!-- Notebook Tab Bar: Research Tree is Primary & Default Active -->
         <div class="tab-strip">
-          <div class="tab-btn active" id="tab-btn-doc" data-tab="doc" onclick="window.app.switchTab('doc')">
-            <span style="color:#aa0000; font-size:11px;">📄</span>
-            <span>proof.v</span>
-          </div>
-          <div class="tab-btn" id="tab-btn-tree" data-tab="tree" onclick="window.app.switchTab('tree')">
+          <div class="tab-btn active" id="tab-btn-tree" data-tab="tree" onclick="window.app.switchTab('tree')">
             <span class="tab-status-dot"></span>
-            <span>Research Tree</span>
+            <span>🌲 Research Tree</span>
           </div>
           <div class="tab-btn" id="tab-btn-dag" data-tab="dag" onclick="window.app.switchTab('dag')">
-            <span>Proof DAG</span>
+            <span>📊 Proof DAG</span>
+          </div>
+          <div class="tab-btn" id="tab-btn-doc" data-tab="doc" onclick="window.app.switchTab('doc')">
+            <span style="color:#aa0000; font-size:11px;">📄</span>
+            <span>proof.v (Document)</span>
           </div>
         </div>
 
         <!-- Sunken Frame containing active view -->
         <div class="sunken-frame">
-          <!-- Document / Coq Script View with Gutter Line Numbers -->
-          <div class="tab-content active" id="tab-doc">
-            <div class="editor-layout">
-              <div class="gutter-lines" id="editor-gutter">
-                1<br>2<br>3<br>4<br>5<br>6<br>7<br>8<br>9<br>10<br>11<br>12<br>13<br>14<br>15<br>16<br>17<br>18<br>19<br>20<br>21<br>22
-              </div>
-              <div class="coq-script-editor" id="document-content" contenteditable="false">
-                <!-- Dynamically populated with evaluated green region & syntax highlighted proof -->
-              </div>
-            </div>
-          </div>
-
-          <!-- Research Tree Tab -->
-          <div class="tab-content" id="tab-tree">
+          <!-- Research Tree Tab (Active by Default) -->
+          <div class="tab-content active" id="tab-tree">
             <div class="graph-viewport" id="tree-canvas-container"></div>
             <div class="graph-controls">
               <button class="btn-graph-ctl" id="btn-fit-tree" onclick="window.app.treeRenderer.fitToScreen()" title="Fit to Screen">Fit</button>
@@ -184,6 +172,18 @@
             <div class="graph-controls">
               <button class="btn-graph-ctl" id="btn-fit-dag" onclick="window.app.dagRenderer.fitToScreen()" title="Fit to Screen">Fit</button>
               <button class="btn-graph-ctl" id="btn-reset-dag" onclick="window.app.dagRenderer.resetZoom()" title="Reset Zoom">1:1</button>
+            </div>
+          </div>
+
+          <!-- Document / Coq Script View with Gutter Line Numbers -->
+          <div class="tab-content" id="tab-doc">
+            <div class="editor-layout">
+              <div class="gutter-lines" id="editor-gutter">
+                1<br>2<br>3<br>4<br>5<br>6<br>7<br>8<br>9<br>10<br>11<br>12<br>13<br>14<br>15<br>16<br>17<br>18<br>19<br>20<br>21<br>22
+              </div>
+              <div class="coq-script-editor" id="document-content" contenteditable="false">
+                <!-- Dynamically populated with evaluated green region & syntax highlighted proof -->
+              </div>
             </div>
           </div>
         </div>
@@ -278,12 +278,33 @@ Hm : n = m
 
     <!-- Authentic Sunken Status Bar -->
     <div class="status-bar">
-      <div class="status-segment main" id="status-main-label">Ready in Predicate_Logic, proving nat_eq_dec</div>
+      <div class="status-segment main" id="status-main-label">Ready in Predicate_Logic, proving theorem</div>
+      <div class="status-segment" id="badge-problem" style="max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Theorem: oddtown</div>
       <div class="status-segment" id="status-stage-label">Stage: READY</div>
       <div class="status-segment" id="status-calls">Calls: 0</div>
       <div class="status-segment" id="status-tokens">0k tok</div>
       <div class="status-segment" id="status-cost">$0.00 / $20.00</div>
       <div class="status-segment coqide-badge" id="status-connection">Coqide started</div>
+    </div>
+  </div>
+
+  <!-- Modal: Run Setup / Custom Problem -->
+  <div class="modal-overlay" id="modal-run-setup">
+    <div class="modal-window" style="width: 580px;">
+      <div class="modal-header">
+        <span>New Run / Custom Theorem</span>
+        <button class="btn-close-modal" onclick="window.app.closeModals()">&#10005;</button>
+      </div>
+      <div class="modal-content">
+        <div class="form-group">
+          <label class="form-label">Theorem Statement (Informal or Formal):</label>
+          <textarea class="form-input" id="input-problem" rows="4" style="width: 100%; font-family: var(--font-mono); font-size: 11px;" placeholder="e.g. Prove that every planar graph with girth >= 5 has an independent set of size at least n / 3."></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-tool btn-close-modal" onclick="window.app.closeModals()">Cancel</button>
+        <button class="btn-tool" style="font-weight: bold;" onclick="window.app.handleRunAll()">Start Run</button>
+      </div>
     </div>
   </div>
 

@@ -22,7 +22,7 @@ class MiniColosseumApp {
       hmed_records: [],
     };
     this.selectedNode = null;
-    this.activeTab = "doc";
+    this.activeTab = "tree";
     this.activeInspTab = "goals";
     this.filterSeverity = "all";
 
@@ -228,8 +228,10 @@ Qed.`,
     const prob = this.problemsMap[key];
     if (!prob) return;
 
-    document.getElementById("status-main-label").textContent = `Ready in Predicate_Logic, proving ${prob.title}`;
-    document.getElementById("badge-problem").textContent = `Theorem: ${prob.title}`;
+    const mainLbl = document.getElementById("status-main-label");
+    if (mainLbl) mainLbl.textContent = `Ready in Predicate_Logic, proving ${prob.title}`;
+    const badgeProb = document.getElementById("badge-problem");
+    if (badgeProb) badgeProb.textContent = `Theorem: ${prob.title}`;
 
     // Update proof.v script editor content
     this.renderInitialScript(prob.coqCode);
@@ -264,7 +266,7 @@ Qed.`,
 
   switchTab(tab) {
     this.activeTab = tab;
-    ["doc", "tree", "dag"].forEach((t) => {
+    ["tree", "dag", "doc"].forEach((t) => {
       const btn = document.getElementById(`tab-btn-${t}`);
       const content = document.getElementById(`tab-${t}`);
       if (t === tab) {
@@ -276,9 +278,16 @@ Qed.`,
       }
     });
 
-    // setTimeout so newly-visible tab's SVG has real pixel dimensions before fitToScreen
-    if (tab === "tree") setTimeout(() => this.treeRenderer.fitToScreen(), 80);
-    if (tab === "dag") setTimeout(() => this.dagRenderer.fitToScreen(), 80);
+    if (tab === "tree") {
+      requestAnimationFrame(() => this.treeRenderer?.fitToScreen());
+      setTimeout(() => this.treeRenderer?.fitToScreen(), 50);
+      setTimeout(() => this.treeRenderer?.fitToScreen(), 180);
+    }
+    if (tab === "dag") {
+      requestAnimationFrame(() => this.dagRenderer?.fitToScreen());
+      setTimeout(() => this.dagRenderer?.fitToScreen(), 50);
+      setTimeout(() => this.dagRenderer?.fitToScreen(), 180);
+    }
     if (tab === "doc") this.renderDocument();
   }
 
@@ -431,11 +440,14 @@ Qed.`,
       totalOut += n.tokens_out || 0;
     });
 
-    document.getElementById("status-calls").textContent = `Calls: ${calls}`;
+    const sc = document.getElementById("status-calls");
+    if (sc) sc.textContent = `Calls: ${calls}`;
     const totalTokK = Math.round((totalIn + totalOut) / 1000);
     const cachedTokK = Math.round(totalCached / 1000);
-    document.getElementById("status-tokens").textContent = `${totalTokK}k tok (${cachedTokK}k cached)`;
-    document.getElementById("status-cost").textContent = `$${totalCost.toFixed(4)} / $20.00`;
+    const st = document.getElementById("status-tokens");
+    if (st) st.textContent = `${totalTokK}k tok (${cachedTokK}k cached)`;
+    const sco = document.getElementById("status-cost");
+    if (sco) sco.textContent = `$${totalCost.toFixed(4)} / $20.00`;
   }
 
   selectNode(node) {
@@ -462,51 +474,65 @@ Qed.`,
     if (node.model) {
       hypotheses += `\nH_model : ${node.model}`;
     }
-    hypothesesEl.textContent = hypotheses;
+    if (hypothesesEl) hypothesesEl.textContent = hypotheses;
 
     // Subgoals target
     const out = node.output || {};
     const targetClaim = out.target_claim || out.primary_route || out.claimed_result || "Prove subproblem obligation.";
     const backupRoute = (out.backup_routes && out.backup_routes[0]) || out.concrete_next_task || "{S n = S m} + {S n <> S m}";
 
-    subgoalsCountEl.textContent = `${(out.active_obligations && out.active_obligations.length) || 2} subgoals (Focus: ${label})`;
-    tag1El.textContent = "(1/2)";
-    target1El.textContent = targetClaim;
-    tag2El.textContent = "(2/2)";
-    target2El.textContent = backupRoute;
+    if (subgoalsCountEl) subgoalsCountEl.textContent = `${(out.active_obligations && out.active_obligations.length) || 2} subgoals (Focus: ${label})`;
+    if (tag1El) tag1El.textContent = "(1/2)";
+    if (target1El) target1El.textContent = targetClaim;
+    if (tag2El) tag2El.textContent = "(2/2)";
+    if (target2El) target2El.textContent = backupRoute;
 
     // Node Details Tab
-    document.getElementById("insp-meta-text").innerHTML = `
-      <strong>Node:</strong> ${label} (${node.id}) | <strong>Stage:</strong> ${node.stage} (Round ${node.round || 1})<br>
-      <strong>Model:</strong> ${node.model || "muse-spark-1.3"} | <strong>Cost:</strong> $${(node.cost_usd || 0).toFixed(6)}<br>
-      <strong>Tokens:</strong> In ${node.tokens_in || 0} (${node.tokens_cached || 0} cached) | Out ${node.tokens_out || 0}
-    `;
-    document.getElementById("insp-input-content").textContent = node.input_summary || "Prompt summary.";
-    document.getElementById("insp-output-content").textContent = JSON.stringify(node.output || {}, null, 2);
+    const metaEl = document.getElementById("insp-meta-text");
+    if (metaEl) {
+      metaEl.innerHTML = `
+        <strong>Node:</strong> ${label} (${node.id}) | <strong>Stage:</strong> ${node.stage} (Round ${node.round || 1})<br>
+        <strong>Model:</strong> ${node.model || "muse-spark-1.3"} | <strong>Cost:</strong> $${(node.cost_usd || 0).toFixed(6)}<br>
+        <strong>Tokens:</strong> In ${node.tokens_in || 0} (${node.tokens_cached || 0} cached) | Out ${node.tokens_out || 0}
+      `;
+    }
+    const inEl = document.getElementById("insp-input-content");
+    if (inEl) inEl.textContent = node.input_summary || "Prompt summary.";
+    const outEl = document.getElementById("insp-output-content");
+    if (outEl) outEl.textContent = JSON.stringify(node.output || {}, null, 2);
 
     // Falsifier Report Tab
-    if (node.falsifier_report) {
-      const f = node.falsifier_report;
-      let fText = `Verdict: ${f.verdict}\nAssessment: ${f.assessment || ""}\n`;
-      if (f.weakest_lemmas && f.weakest_lemmas.length) {
-        fText += `Weakest Lemmas: ${f.weakest_lemmas.join(", ")}\n`;
+    const fEl = document.getElementById("insp-falsifier-content");
+    if (fEl) {
+      if (node.falsifier_report) {
+        const f = node.falsifier_report;
+        let fText = `Verdict: ${f.verdict}\nAssessment: ${f.assessment || ""}\n`;
+        if (f.weakest_lemmas && f.weakest_lemmas.length) {
+          fText += `Weakest Lemmas: ${f.weakest_lemmas.join(", ")}\n`;
+        }
+        if (f.categorized_objections && f.categorized_objections.length) {
+          fText += `Objections: ${JSON.stringify(f.categorized_objections, null, 2)}\n`;
+        }
+        fEl.textContent = fText;
+      } else {
+        fEl.textContent = "No falsifier report attached.";
       }
-      if (f.categorized_objections && f.categorized_objections.length) {
-        fText += `Objections: ${JSON.stringify(f.categorized_objections, null, 2)}\n`;
-      }
-      document.getElementById("insp-falsifier-content").textContent = fText;
-    } else {
-      document.getElementById("insp-falsifier-content").textContent = "No falsifier report attached.";
     }
 
     // HMED Revision Tab
-    const hmedRecords = this.currentRunData.hmed_records || [];
-    const nodeHmed = hmedRecords.find((r) => r.subproblem_index === (out.section_index || 0) || r.subproblem_index === 2);
-    if (nodeHmed) {
-      document.getElementById("insp-hmed-content").textContent = JSON.stringify(nodeHmed, null, 2);
+    const hmedEl = document.getElementById("insp-hmed-content");
+    if (hmedEl) {
+      const hmedRecords = this.currentRunData.hmed_records || [];
+      const nodeHmed = hmedRecords.find((r) => r.subproblem_index === (out.section_index || 0) || r.subproblem_index === 2);
+      if (nodeHmed) {
+        hmedEl.textContent = JSON.stringify(nodeHmed, null, 2);
+      } else {
+        hmedEl.textContent = "No revision records for this node.";
+      }
     }
 
-    document.getElementById("status-main-label").textContent = `Ready in Predicate_Logic, proving ${label}`;
+    const sml = document.getElementById("status-main-label");
+    if (sml) sml.textContent = `Ready in Predicate_Logic, proving ${label}`;
   }
 
   highlightDocumentSection(node) {
@@ -661,7 +687,7 @@ Qed.`,
     };
 
     const problem = (data.run ? data.run.problem : "") || "Mathematical Research Problem";
-    document.getElementById("badge-problem").textContent = `Theorem: ${problem.substring(0, 45)}...`;
+    const bp = document.getElementById("badge-problem"); if (bp) bp.textContent = `Theorem: ${problem.substring(0, 45)}...`;
 
     const stream = document.getElementById("event-log-stream");
     stream.innerHTML = "";
@@ -794,6 +820,12 @@ Qed.`,
   }
 }
 
+window.MiniColosseumApp = MiniColosseumApp;
+
 window.addEventListener("DOMContentLoaded", () => {
-  window.app = new MiniColosseumApp();
+  try {
+    window.app = new MiniColosseumApp();
+  } catch (err) {
+    console.error("CRITICAL MiniColosseumApp init failure:", err);
+  }
 });

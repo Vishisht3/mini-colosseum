@@ -49,7 +49,7 @@ DEFAULT_ROLE_MODELS = {
     "curator": "muse-spark-1.3-contributor",
 }
 
-# Standard demo problems for instant evaluation
+# Standard demo problems and 5-lemma evaluation benchmark
 DEMO_PROBLEMS = [
     {
         "id": "erdos_szekeres",
@@ -58,10 +58,22 @@ DEMO_PROBLEMS = [
         "known_route": "Pigeonhole principle on length of longest increasing subsequence ending at each element x_i.",
     },
     {
+        "id": "oddtown",
+        "title": "The Oddtown Theorem (Berlekamp 1969)",
+        "statement": "In a town with n residents, a collection of clubs is formed such that every club has an odd number of members, and every two distinct clubs share an even number of members. Prove that the total number of clubs cannot exceed n.",
+        "known_route": "Incidence vectors in F_2^n. Distinct club intersections modulo 2 yield identity Gram matrix over F_2, proving linear independence and dimension bound m <= n.",
+    },
+    {
         "id": "ramsey_k6",
         "title": "Ramsey Number R(3, 3) = 6",
         "statement": "Prove that in any 2-coloring of the edges of a complete graph K_6 with colors Red and Blue, there exists at least one monochromatic triangle.",
         "known_route": "Select arbitrary vertex v. By Pigeonhole Principle, at least 3 of its 5 incident edges have the same color. If any edge between those 3 endpoints has that color, a triangle is formed; otherwise the 3 endpoints form an opposite monochromatic triangle.",
+    },
+    {
+        "id": "mantel",
+        "title": "Mantel's Theorem on Triangle-Free Graphs",
+        "statement": "Prove that every triangle-free graph on n vertices contains at most floor(n^2 / 4) edges, and that this bound is achieved by the complete bipartite graph K_{floor(n/2), ceil(n/2)}.",
+        "known_route": "Sum of degrees across endpoints of each edge uv satisfies d(u) + d(v) <= n since N(u) and N(v) are disjoint. Summing over all edges gives sum d(v)^2 <= n * e; by Cauchy-Schwarz e <= n^2/4.",
     },
     {
         "id": "girth5_indset",
@@ -73,6 +85,10 @@ DEMO_PROBLEMS = [
 
 # Preset configurations
 SIZE_PRESETS = {
+    "Hackathon-v1.1": {
+        "widths": [9, 6, 3, 1],
+        "k": 4,
+    },
     "Small": {
         "widths": [4, 2, 1],
         "k": 3,

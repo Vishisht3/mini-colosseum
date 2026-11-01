@@ -116,6 +116,37 @@ class RunStore:
                 caveats TEXT
             )
             """)
+
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS hmed_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                record_id TEXT,
+                run_id TEXT,
+                stage TEXT,
+                subproblem_index INTEGER,
+                failed_draft TEXT,
+                critique TEXT,
+                revised_draft TEXT,
+                downstream_verdict TEXT,
+                attribution_defect TEXT,
+                cost_usd REAL,
+                model_solver TEXT,
+                model_falsifier TEXT
+            )
+            """)
+
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS raw_provenance (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                claim_id TEXT,
+                run_id TEXT,
+                source_node TEXT,
+                target_statement TEXT,
+                falsifier_verdict TEXT,
+                failure_point TEXT,
+                boundary_cases_json TEXT
+            )
+            """)
             conn.commit()
         finally:
             conn.close()
@@ -285,6 +316,85 @@ class RunStore:
         finally:
             conn.close()
 
+    def add_raw_provenance(self, run_id: str, entry: Dict[str, Any]):
+        conn = sqlite3.connect(self.db_path)
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+            INSERT INTO raw_provenance (claim_id, run_id, source_node, target_statement, falsifier_verdict, failure_point, boundary_cases_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                entry.get("claim_id", ""),
+                run_id,
+                entry.get("source_node", ""),
+                entry.get("target_statement", ""),
+                entry.get("falsifier_verdict", "survives"),
+                entry.get("failure_point"),
+                json.dumps(entry.get("tested_boundary_cases", [])),
+            ))
+            conn.commit()
+        finally:
+            conn.close()
+
+    def get_raw_provenance(self, run_id: str) -> List[Dict[str, Any]]:
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM raw_provenance WHERE run_id = ?", (run_id,))
+            rows = cursor.fetchall()
+            res = []
+            for r in rows:
+                item = dict(r)
+                item["tested_boundary_cases"] = json.loads(r["boundary_cases_json"] or "[]")
+                res.append(item)
+            return res
+        finally:
+            conn.close()
+
+    def save_hmed_record(self, record: Any):
+        conn = sqlite3.connect(self.db_path)
+        try:
+            cursor = conn.cursor()
+            data = record.model_dump() if hasattr(record, "model_dump") else record
+            cursor.execute("""
+            INSERT INTO hmed_records (
+                record_id, run_id, stage, subproblem_index, failed_draft,
+                critique, revised_draft, downstream_verdict, attribution_defect,
+                cost_usd, model_solver, model_falsifier
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                data.get("record_id", ""),
+                data.get("run_id", ""),
+                data.get("stage", ""),
+                data.get("subproblem_index"),
+                data.get("failed_draft", ""),
+                data.get("critique", ""),
+                data.get("revised_draft", ""),
+                data.get("downstream_verdict", "accepted"),
+                data.get("attribution_defect"),
+                data.get("cost_usd", 0.0),
+                data.get("model_solver", "muse-spark-1.3"),
+                data.get("model_falsifier", "muse-wonder-1.0"),
+            ))
+            conn.commit()
+        finally:
+            conn.close()
+
+    def export_hmed_records(self, run_id: str) -> List[Dict[str, Any]]:
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM hmed_records WHERE run_id = ?", (run_id,))
+            return [dict(r) for r in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def export_hmed_jsonl(self, run_id: str) -> str:
+        records = self.export_hmed_records(run_id)
+        return "\n".join(json.dumps(r) for r in records)
+
     def get_run(self, run_id: str) -> Optional[Dict[str, Any]]:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
@@ -342,14 +452,26 @@ class RunStore:
             cursor.execute("SELECT entry_type, title, contents, source, caveats FROM knowledge WHERE run_id = ?", (run_id,))
             knowledge = [dict(r) for r in cursor.fetchall()]
 
+            cursor.execute("SELECT record_id, stage, subproblem_index, failed_draft, critique, revised_draft, downstream_verdict, attribution_defect, cost_usd, model_solver, model_falsifier FROM hmed_records WHERE run_id = ?", (run_id,))
+            hmed_records = [dict(r) for r in cursor.fetchall()]
+
+            cursor.execute("SELECT claim_id, source_node, target_statement, falsifier_verdict, failure_point, boundary_cases_json FROM raw_provenance WHERE run_id = ?", (run_id,))
+            raw_prov = []
+            for r in cursor.fetchall():
+                item = dict(r)
+                item["tested_boundary_cases"] = json.loads(r["boundary_cases_json"] or "[]")
+                raw_prov.append(item)
+
             return {
-                "version": "1.0",
-                "harness": "Mini-Colosseum (Stellar Colosseum Reimplementation)",
+                "version": "1.1",
+                "harness": "Mini-Colosseum (Stellar Colosseum Reimplementation v1.1)",
                 "run": dict(run_row),
                 "nodes": nodes,
                 "edges": edges,
                 "events": events,
                 "knowledge_directory": knowledge,
+                "raw_provenance": raw_prov,
+                "hmed_records": hmed_records,
                 "assembled_latex": run_row["assembled_latex"] or "",
             }
         finally:

@@ -11,7 +11,7 @@ Based on Section 5.4 of Mini-Colosseum Specification v1.0.
 
 import asyncio
 import time
-from typing import Dict, Any, List, Callable, Awaitable, Tuple
+from typing import Dict, Any, List, Callable, Awaitable, Tuple, Optional
 from ..models import Node, Edge, Event, SectionPlan, SubproblemSpec
 from ..client import ModelClient
 
@@ -23,11 +23,13 @@ class SectionSolvingEngine:
         emit_event: Callable[[Event], Awaitable[None]],
         save_node: Callable[[Node], None],
         save_edge: Callable[[Edge], None],
+        save_hmed: Optional[Callable[[Any], None]] = None,
     ):
         self.client = client
         self.emit_event = emit_event
         self.save_node = save_node
         self.save_edge = save_edge
+        self.save_hmed = save_hmed
 
     async def solve_plan(
         self,
@@ -208,6 +210,25 @@ class SectionSolvingEngine:
                 node.status = "accepted"
                 completed_bodies[idx] = s_out.get("solution_body", "")
                 self.save_node(run_id, node)
+
+                # Record revision-consequence tuple for HMED distillation
+                if retry_count > 0 and self.save_hmed:
+                    from ..models import HMEDRecord
+                    hmed = HMEDRecord(
+                        record_id=f"HMED-{run_id}-SEC{idx}-{retry_count}",
+                        run_id=run_id,
+                        stage="solving",
+                        subproblem_index=idx,
+                        failed_draft=prior_failed_draft if 'prior_failed_draft' in locals() else prior_critique,
+                        critique=prior_critique,
+                        revised_draft=s_out.get("solution_body", ""),
+                        downstream_verdict="accepted",
+                        cost_usd=round(node.cost_usd, 6),
+                        model_solver=model_solver,
+                        model_falsifier=model_falsifier,
+                    )
+                    self.save_hmed(hmed)
+
                 await self.emit_event(
                     Event(
                         run_id=run_id,
@@ -264,6 +285,7 @@ class SectionSolvingEngine:
                 if retry_count < max_retries_per_section:
                     await asyncio.sleep(0.3)
                     # Retry locally with critique
+                    prior_failed_draft = s_out.get("solution_body", "")
                     return await solve_single_section(idx, retry_count + 1, prior_critique=critique_msg)
                 else:
                     node.status = "error"

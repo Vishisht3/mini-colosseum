@@ -88,12 +88,13 @@ async def websocket_endpoint(websocket: WebSocket):
 
 class StartRunRequest(BaseModel):
     problem_statement: str
-    size_preset: str = "Small"
+    size_preset: str = "Hackathon-v1.1"
     tree_widths: Optional[List[int]] = None
-    k_sample: int = 3
+    k_sample: Optional[int] = None
     budget_cap_usd: float = 20.0
     max_rounds: int = 2
     mock_mode: Optional[bool] = None
+    cross_model_review: bool = True
     force_section_retry: bool = False
 
 
@@ -105,8 +106,9 @@ async def start_run(req: StartRunRequest):
         if active_orchestrator:
             active_orchestrator.stop()
 
-    widths = req.tree_widths or SIZE_PRESETS.get(req.size_preset, {}).get("widths", [4, 2, 1])
-    k = req.k_sample or SIZE_PRESETS.get(req.size_preset, {}).get("k", 3)
+    preset_cfg = SIZE_PRESETS.get(req.size_preset, SIZE_PRESETS["Hackathon-v1.1"])
+    widths = req.tree_widths or preset_cfg.get("widths", [9, 6, 3, 1])
+    k = req.k_sample or preset_cfg.get("k", 4)
     mock = req.mock_mode if req.mock_mode is not None else server_settings["mock_mode"]
 
     config = RunConfig(
@@ -114,6 +116,7 @@ async def start_run(req: StartRunRequest):
         size_preset=req.size_preset,  # type: ignore
         tree_widths=widths,
         k_sample=k,
+        cross_model_review=req.cross_model_review,
         models_per_role=server_settings["default_models"],
         budget_cap_usd=req.budget_cap_usd,
         max_rounds=req.max_rounds,
@@ -221,6 +224,33 @@ async def export_objections(run_id: str):
 async def export_knowledge(run_id: str):
     trace = store.export_trace_json(run_id)
     return JSONResponse(trace.get("knowledge_directory", []))
+
+
+@app.get("/api/runs/{run_id}/export/hmed")
+async def export_hmed_records(run_id: str):
+    """
+    Export revision-consequence records in JSONL format for HMED (Meta Oct 2026).
+    Enables direct consumption by offline distillation / RL pipelines.
+    """
+    trace = store.export_trace_json(run_id)
+    records = trace.get("hmed_records", [])
+    if not records:
+        # If no local retry in this run, create benchmark example record
+        records = store.export_hmed_records(run_id)
+    jsonl_str = "\n".join(json.dumps(r) for r in records)
+    return PlainTextResponse(jsonl_str, media_type="application/x-jsonlines")
+
+
+@app.get("/api/eval/benchmark")
+async def get_evaluation_benchmark():
+    """
+    Returns the 5-Lemma Evaluation Benchmark defined in SPEC v1.1.
+    """
+    return {
+        "description": "5-Lemma reference-assisted evaluation benchmark (SPEC v1.1)",
+        "protocol": "Direct frontier call vs. Mini-Colosseum (9,6,3,1) tree with cross-model falsification at matched compute cost",
+        "lemmas": DEMO_PROBLEMS,
+    }
 
 
 @app.get("/api/fixtures/{fixture_name}")

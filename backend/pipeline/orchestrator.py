@@ -56,7 +56,11 @@ class Orchestrator:
             self.client, self.emit_event, self._save_node, self._save_edge
         )
         self.solving_engine = SectionSolvingEngine(
-            self.client, self.emit_event, self._save_node, self._save_edge
+            self.client,
+            self.emit_event,
+            self._save_node,
+            self._save_edge,
+            save_hmed=self.store.save_hmed_record,
         )
         self.verification_engine = GlobalVerificationEngine(
             self.client, self.emit_event, self._save_node
@@ -136,12 +140,24 @@ class Orchestrator:
         self.step_event.set()
 
     def format_knowledge_prefix(self) -> str:
-        """Format knowledge directory for stable prefix caching."""
-        if not self.knowledge_entries:
-            return ""
-        lines = ["=== KNOWLEDGE DIRECTORY (STABLE CACHE) ==="]
-        for ke in self.knowledge_entries:
-            lines.append(f"[{ke.entry_type.upper()}] {ke.title}: {ke.contents} (Source: {ke.source})")
+        """
+        Anti-Persistence Raw Memory Format (v1.1, arXiv:2610.27406).
+        Replaces hallucinated narrative memory summaries with raw, unfalsified claim provenance.
+        Only claims verified and not rejected by falsifiers are injected into stable prefix.
+        """
+        prov_entries = self.store.get_raw_provenance(self.run_id)
+        unfalsified = [p for p in prov_entries if p.get("falsifier_verdict") == "survives"]
+        if not unfalsified:
+            if not self.knowledge_entries:
+                return ""
+            lines = ["=== VERIFIED LEMMA INVARIANTS ==="]
+            for ke in self.knowledge_entries:
+                lines.append(f"• [{ke.entry_type.upper()}] {ke.title}: {ke.contents} (Source: {ke.source})")
+            return "\n".join(lines)
+
+        lines = ["=== ANTI-PERSISTENCE VERIFIED PROVENANCE CACHE ==="]
+        for p in unfalsified:
+            lines.append(f"• [Claim {p.get('claim_id')}] (Node: {p.get('source_node')}): {p.get('target_statement')}")
         return "\n".join(lines)
 
     async def execute(self, force_section2_retry: bool = False) -> Dict[str, Any]:
@@ -171,6 +187,10 @@ class Orchestrator:
                 # STAGE 1: Strategy Exploration
                 await self.check_pause_and_step()
                 knowledge_prefix = self.format_knowledge_prefix()
+                model_exp = self.config.models_per_role.get("explorer", "muse-spark-1.3")
+                model_fal = "muse-wonder-1.0" if self.config.cross_model_review else self.config.models_per_role.get("falsifier", "muse-spark-1.3")
+                model_agg = self.config.models_per_role.get("aggregator", "muse-spark-1.3")
+
                 strategy_root = await self.exploration_engine.run_exploration(
                     run_id=self.run_id,
                     problem=self.config.problem_statement,
@@ -178,9 +198,9 @@ class Orchestrator:
                     k=self.config.k_sample,
                     round_num=current_round,
                     knowledge_prefix=knowledge_prefix,
-                    model_explorer=self.config.models_per_role.get("explorer", "muse-spark-1.3"),
-                    model_falsifier=self.config.models_per_role.get("falsifier", "muse-spark-1.3"),
-                    model_aggregator=self.config.models_per_role.get("aggregator", "muse-spark-1.3"),
+                    model_explorer=model_exp,
+                    model_falsifier=model_fal,
+                    model_aggregator=model_agg,
                     prior_context=prior_failed_feedback,
                 )
 
@@ -237,14 +257,17 @@ class Orchestrator:
 
                 # STAGE 4: Subproblem Solving (Proof DAG)
                 await self.check_pause_and_step()
+                model_solv = self.config.models_per_role.get("solver", "muse-spark-1.3")
+                model_sec_fal = "muse-wonder-1.0" if self.config.cross_model_review else self.config.models_per_role.get("section_falsifier", "muse-spark-1.3")
+
                 section_bodies, assembled_latex = await self.solving_engine.solve_plan(
                     run_id=self.run_id,
                     problem=self.config.problem_statement,
                     plan=plan,
                     round_num=current_round,
                     knowledge_prefix=self.format_knowledge_prefix(),
-                    model_solver=self.config.models_per_role.get("solver", "muse-spark-1.3"),
-                    model_falsifier=self.config.models_per_role.get("section_falsifier", "muse-spark-1.3"),
+                    model_solver=model_solv,
+                    model_falsifier=model_sec_fal,
                     force_section2_retry=force_section2_retry,
                 )
                 self.assembled_latex = assembled_latex

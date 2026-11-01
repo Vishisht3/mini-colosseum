@@ -25,13 +25,14 @@ async def generate_fixtures():
     store = RunStore(db_path=temp_db)
 
     # 1. Clean Success
-    print("Generating fixture 1: Clean Success...")
+    print("Generating fixture 1: Clean Success (v1.1 tree: 9, 6, 3, 1, k=4)...")
     cfg1 = RunConfig(
         run_id="run_clean_success",
         problem_statement="Prove that every sequence of n^2 + 1 distinct real numbers contains a monotonic subsequence of length n + 1.",
-        size_preset="Small",
-        tree_widths=[4, 2, 1],
-        k_sample=3,
+        size_preset="Hackathon-v1.1",
+        tree_widths=[9, 6, 3, 1],
+        k_sample=4,
+        cross_model_review=True,
         budget_cap_usd=20.0,
         max_rounds=1,
         mock_mode=True,
@@ -41,14 +42,15 @@ async def generate_fixtures():
     with open(os.path.join(FIXTURES_DIR, "fixture_clean_success.json"), "w") as f:
         json.dump(trace1, f, indent=2)
 
-    # 2. Section Retry
-    print("Generating fixture 2: Section Retry...")
+    # 2. Section Retry (Generates HMED Revision Record)
+    print("Generating fixture 2: Section Retry with HMED Revision Consequence Record...")
     cfg2 = RunConfig(
         run_id="run_section_retry",
         problem_statement="Prove that in any 2-coloring of the edges of a complete graph K_6 with colors Red and Blue, there exists at least one monochromatic triangle.",
-        size_preset="Small",
-        tree_widths=[4, 2, 1],
-        k_sample=3,
+        size_preset="Hackathon-v1.1",
+        tree_widths=[9, 6, 3, 1],
+        k_sample=4,
+        cross_model_review=True,
         budget_cap_usd=20.0,
         max_rounds=1,
         mock_mode=True,
@@ -63,9 +65,10 @@ async def generate_fixtures():
     cfg3 = RunConfig(
         run_id="run_re_exploration",
         problem_statement="Prove that every planar graph G with n vertices and girth at least 5 has an independent set of size at least n / 3.",
-        size_preset="Small",
-        tree_widths=[4, 2, 1],
-        k_sample=3,
+        size_preset="Hackathon-v1.1",
+        tree_widths=[9, 6, 3, 1],
+        k_sample=4,
+        cross_model_review=True,
         budget_cap_usd=20.0,
         max_rounds=2,
         mock_mode=True,

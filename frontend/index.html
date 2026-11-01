@@ -22,6 +22,7 @@
           <div class="dropdown-divider"></div>
           <div class="dropdown-item" id="menu-export-latex">Export Proof as LaTeX (.tex)</div>
           <div class="dropdown-item" id="menu-export-json">Export Full Trace as JSON (.json)</div>
+          <div class="dropdown-item" onclick="window.app.exportDirect('hmed')">Export HMED Revision Traces (.jsonl)</div>
           <div class="dropdown-divider"></div>
           <div class="dropdown-item" onclick="window.close()">Quit</div>
         </div>
@@ -247,7 +248,8 @@
           <div class="form-group">
             <label class="form-label">Size Preset:</label>
             <select class="form-select" id="select-preset">
-              <option value="Small" selected>Small (widths [4, 2, 1], k=3)</option>
+              <option value="Hackathon-v1.1" selected>Hackathon v1.1 (widths [9, 6, 3, 1], k=4, ~75 calls)</option>
+              <option value="Small">Small (widths [4, 2, 1], k=3)</option>
               <option value="Medium">Medium (widths [8, 4, 2, 1], k=3)</option>
               <option value="Paper">Paper Scale (widths [16, 8, 4, 2, 1], k=5)</option>
             </select>
@@ -259,7 +261,10 @@
         </div>
         <div class="form-group" style="margin-top: 6px;">
           <label class="form-label" style="font-weight: normal;">
-            <input type="checkbox" id="checkbox-force-retry"> Demonstrate Section 2 failure and automatic local retry (Acceptance Criterion 6)
+            <input type="checkbox" id="checkbox-cross-model" checked> Cross-Model Adversarial Review (Solver: Spark, Falsifier: Wonder)
+          </label>
+          <label class="form-label" style="font-weight: normal; margin-top: 3px;">
+            <input type="checkbox" id="checkbox-force-retry"> Demonstrate Section 2 failure and automatic local retry (Generates HMED trace)
           </label>
         </div>
       </div>
@@ -333,6 +338,9 @@
         </button>
         <button class="btn-tool" onclick="window.app.exportDirect('json')" style="padding: 8px 12px; justify-content: flex-start;">
           <strong>Export Full Trace as JSON (.json)</strong> - Replayable graph trace & token costs
+        </button>
+        <button class="btn-tool" onclick="window.app.exportDirect('hmed')" style="padding: 8px 12px; justify-content: flex-start;">
+          <strong>Export HMED Revision Records (.jsonl)</strong> - (attempt, critique, revision, outcome) for Meta HMED distillation
         </button>
         <button class="btn-tool" onclick="window.app.exportDirect('objections')" style="padding: 8px 12px; justify-content: flex-start;">
           <strong>Export Unresolved Objections (.md)</strong> - Falsifier critique report

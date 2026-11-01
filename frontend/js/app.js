@@ -615,6 +615,7 @@ class MiniColosseumApp {
 
     const preset = document.getElementById("select-preset").value;
     const budget = parseFloat(document.getElementById("input-budget").value) || 20.0;
+    const crossModel = document.getElementById("checkbox-cross-model") ? document.getElementById("checkbox-cross-model").checked : true;
     const forceRetry = document.getElementById("checkbox-force-retry").checked;
 
     document.querySelectorAll(".modal-overlay").forEach((m) => m.classList.remove("active"));
@@ -642,6 +643,7 @@ class MiniColosseumApp {
           problem_statement: problem,
           size_preset: preset,
           budget_cap_usd: budget,
+          cross_model_review: crossModel,
           force_section_retry: forceRetry,
         }),
       });

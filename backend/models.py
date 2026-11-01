@@ -158,29 +158,59 @@ class KnowledgeEntry(BaseModel):
     caveats: str = ""
 
 
+class RawProvenanceEntry(BaseModel):
+    claim_id: str
+    source_node: str
+    target_statement: str
+    falsifier_verdict: str = "survives"
+    failure_point: Optional[str] = None
+    tested_boundary_cases: List[str] = Field(default_factory=list)
+
+
+class HMEDRecord(BaseModel):
+    """
+    Revision-Consequence Record for Hindsight Meta-Experience Distillation (HMED).
+    Enables post-training / RL on failure-and-repair trajectories without runtime instability.
+    """
+    record_id: str
+    run_id: str
+    stage: str
+    subproblem_index: Optional[int] = None
+    failed_draft: str
+    critique: str
+    revised_draft: str
+    downstream_verdict: str = "accepted"
+    attribution_defect: Optional[str] = None
+    cost_usd: float = 0.0
+    model_solver: str = "muse-spark-1.3"
+    model_falsifier: str = "muse-wonder-1.0"
+
+
 class KnowledgeDirectory(BaseModel):
     entries: List[KnowledgeEntry] = Field(default_factory=list)
+    raw_provenance: List[RawProvenanceEntry] = Field(default_factory=list)
 
 
 class RunConfig(BaseModel):
     run_id: str = Field(default_factory=lambda: str(uuid.uuid4())[:8])
     problem_statement: str
-    size_preset: Literal["Small", "Medium", "Custom"] = "Small"
-    tree_widths: List[int] = Field(default_factory=lambda: [4, 2, 1])
-    k_sample: int = 3
+    size_preset: Literal["Small", "Medium", "Hackathon-v1.1", "Paper", "Custom"] = "Hackathon-v1.1"
+    tree_widths: List[int] = Field(default_factory=lambda: [9, 6, 3, 1])
+    k_sample: int = 4
+    cross_model_review: bool = True  # Solvers & Falsifiers run complementary models (Spark vs Wonder)
     models_per_role: Dict[str, str] = Field(
         default_factory=lambda: {
             "explorer": "muse-spark-1.3",
-            "falsifier": "muse-spark-1.3",
+            "falsifier": "muse-wonder-1.0",
             "aggregator": "muse-spark-1.3",
             "gate": "muse-wonder-1.0",
             "decomposer": "muse-wonder-1.0",
             "solver": "muse-spark-1.3",
-            "section_falsifier": "muse-spark-1.3",
+            "section_falsifier": "muse-wonder-1.0",
             "global_verifier": "muse-wonder-1.0",
             "curator": "muse-spark-1.3",
         }
     )
     budget_cap_usd: float = 20.0
     max_rounds: int = 2
-    mock_mode: bool = True  # True enables rich deterministic/synthetic simulation when no API key
+    mock_mode: bool = True

@@ -36,7 +36,7 @@ class GraphRenderer {
 
   initSVG() {
     this.container.innerHTML = `
-      <svg class="graph-canvas" width="100%" height="100%">
+      <svg class="graph-canvas" width="100%" height="100%" style="width:100%;height:100%;display:block;">
         <defs>
           <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
             <path d="M 0 1 L 9 5 L 0 9 z" fill="#666660"/>
@@ -101,10 +101,30 @@ class GraphRenderer {
 
   fitToScreen() {
     if (this.nodes.length === 0) return;
-    const bbox = this.viewportGroup.getBBox();
     const rect = this.svg.getBoundingClientRect();
-    if (bbox.width === 0 || bbox.height === 0) return;
-
+    // Guard: if SVG container is not yet visible (display:none), do nothing
+    if (rect.width === 0 || rect.height === 0) return;
+    const bbox = this.viewportGroup.getBBox();
+    if (bbox.width === 0 || bbox.height === 0) {
+      // Fallback: compute bounding box from node positions manually
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      this.nodes.forEach((n) => {
+        const x = n.x || 0; const y = n.y || 0;
+        const w = n.width || 84; const h = n.height || 34;
+        minX = Math.min(minX, x - w / 2);
+        minY = Math.min(minY, y - h / 2);
+        maxX = Math.max(maxX, x + w / 2);
+        maxY = Math.max(maxY, y + h / 2);
+      });
+      if (!isFinite(minX)) return;
+      const scaleX = (rect.width - 60) / (maxX - minX);
+      const scaleY = (rect.height - 60) / (maxY - minY);
+      this.scale = Math.min(scaleX, scaleY, 1.2);
+      this.translateX = (rect.width - (maxX - minX) * this.scale) / 2 - minX * this.scale;
+      this.translateY = 30 - minY * this.scale;
+      this.updateTransform();
+      return;
+    }
     const scaleX = (rect.width - 60) / bbox.width;
     const scaleY = (rect.height - 60) / bbox.height;
     this.scale = Math.min(scaleX, scaleY, 1.2);

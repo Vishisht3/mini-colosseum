@@ -185,6 +185,18 @@ async def list_runs():
     return store.list_runs()
 
 
+@app.post("/api/runs/{run_id}/reexplore")
+async def reexplore_run(run_id: str):
+    """Trigger an additional exploration round on an existing run (or its problem).
+    For now, logs the request and returns status — a live run can hook this."""
+    global active_orchestrator
+    if active_orchestrator and active_orchestrator.run_id == run_id:
+        # Signal the active orchestrator to re-run exploration with prior feedback
+        active_orchestrator.trigger_reexplore()
+        return {"status": "reexplore_triggered", "run_id": run_id}
+    return {"status": "no_matching_active_run", "run_id": run_id}
+
+
 @app.get("/api/runs/{run_id}")
 async def get_run_trace(run_id: str):
     trace = store.export_trace_json(run_id)

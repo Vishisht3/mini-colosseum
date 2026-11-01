@@ -139,6 +139,10 @@ class Orchestrator:
         self.is_stopped = True
         self.step_event.set()
 
+    def trigger_reexplore(self):
+        """Signal orchestrator to queue an additional exploration round."""
+        self.reexplore_requested = True
+
     def format_knowledge_prefix(self) -> str:
         """
         Anti-Persistence Raw Memory Format (v1.1, arXiv:2610.27406).

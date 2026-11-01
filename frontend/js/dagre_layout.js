@@ -18,7 +18,11 @@ class HierarchicalLayout {
     }
 
     const nodeMap = new Map();
-    nodes.forEach(n => nodeMap.set(n.id, { ...n, inDegree: 0, outDegree: 0, layer: 0 }));
+    // Support both n.id (live events) and n.node_id (fixture schema)
+    nodes.forEach(n => {
+      const key = n.id || n.node_id;
+      nodeMap.set(key, { ...n, id: key, inDegree: 0, outDegree: 0, layer: 0 });
+    });
 
     // Count in/out degrees
     edges.forEach(e => {
@@ -35,7 +39,8 @@ class HierarchicalLayout {
     nodes.forEach(n => {
       const r = n.round || 1;
       if (!rounds.has(r)) rounds.set(r, []);
-      rounds.get(r).push(nodeMap.get(n.id));
+      const key = n.id || n.node_id;
+      rounds.get(r).push(nodeMap.get(key));
     });
 
     let currentY = 40;

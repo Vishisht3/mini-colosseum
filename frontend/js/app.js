@@ -276,8 +276,9 @@ Qed.`,
       }
     });
 
-    if (tab === "tree") this.treeRenderer.fitToScreen();
-    if (tab === "dag") this.dagRenderer.fitToScreen();
+    // setTimeout so newly-visible tab's SVG has real pixel dimensions before fitToScreen
+    if (tab === "tree") setTimeout(() => this.treeRenderer.fitToScreen(), 80);
+    if (tab === "dag") setTimeout(() => this.dagRenderer.fitToScreen(), 80);
     if (tab === "doc") this.renderDocument();
   }
 
@@ -625,8 +626,33 @@ Qed.`,
 
   populateRunData(data) {
     this.currentRunId = data.run ? data.run.run_id : "loaded_run";
+
+    // Normalize nodes: fixtures use node_id, live events use id; unify to id
+    const rawNodes = data.nodes || [];
+    const normalizedNodes = rawNodes.map((n) => {
+      const node = { ...n };
+      if (!node.id && node.node_id) node.id = node.node_id;
+      // Parse parents from parents_json if parents array is missing
+      if (!node.parents || node.parents.length === 0) {
+        if (node.parents_json) {
+          try { node.parents = JSON.parse(node.parents_json); } catch (e) { node.parents = []; }
+        } else {
+          node.parents = [];
+        }
+      }
+      // Parse output from output_json if output object is missing
+      if (!node.output && node.output_json) {
+        try { node.output = JSON.parse(node.output_json); } catch (e) { node.output = {}; }
+      }
+      // Parse falsifier_report from falsifier_report_json if missing
+      if (!node.falsifier_report && node.falsifier_report_json) {
+        try { node.falsifier_report = JSON.parse(node.falsifier_report_json); } catch (e) { node.falsifier_report = null; }
+      }
+      return node;
+    });
+
     this.currentRunData = {
-      nodes: data.nodes || [],
+      nodes: normalizedNodes,
       edges: data.edges || [],
       events: data.events || [],
       assembled_latex: data.assembled_latex || (data.run ? data.run.assembled_latex : "") || "",
@@ -651,6 +677,14 @@ Qed.`,
 
     if (this.currentRunData.nodes.length > 0) {
       this.selectNode(this.currentRunData.nodes[0]);
+      // Auto-switch to Research Tree tab so user sees graph immediately
+      // Use timeout so the tab becomes visible before fitToScreen is called
+      const treeNodes = this.currentRunData.nodes.filter(
+        (n) => n.stage === "exploration" || n.type === "explorer" || n.type === "aggregator" || n.type === "gate"
+      );
+      if (treeNodes.length > 0 && this.activeTab === "doc") {
+        setTimeout(() => this.switchTab("tree"), 120);
+      }
     }
   }
 

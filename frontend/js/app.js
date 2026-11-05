@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Mini-Colosseum Research Harness v2.0 Desktop Controller
  * Desktop proof workbench controller:
  * - Direct execution controls (Run All, Step, Pause, Stop, Re-explore)
@@ -47,6 +47,9 @@ class MiniColosseumApp {
 
     // Initialize session token, WebSocket, and startup key setup
     this.initSession();
+
+    // Keep the spend display in step with the backend while a run is live.
+    setInterval(() => { if (this.currentRunId) this.refreshBudgetFromServer(); }, 5000);
   }
 
   async initSession() {
@@ -95,6 +98,8 @@ class MiniColosseumApp {
     document.getElementById("input-problem")?.addEventListener("input", (event) => {
       this.updateProblemTitle(event.target.value);
     });
+    // One problem statement only (maths or CS): the toolbar bar and the
+    // modal textarea are two views of the same single statement.
     document.getElementById("input-attachments")?.addEventListener("change", (event) => {
       this.addAttachments(Array.from(event.target.files || []));
       event.target.value = "";
@@ -118,10 +123,11 @@ class MiniColosseumApp {
       });
     }
 
-    ["setup-input-api-key", "setup-input-baseten-key"].forEach((id) => {
+    ["setup-input-api-key", "setup-input-baseten-key", "setup-input-fireworks-key"].forEach((id) => {
       document.getElementById(id)?.addEventListener("input", () => this.updateKeySaveState());
     });
     document.getElementById("setup-checkbox-baseten-fallback")?.addEventListener("change", () => this.updateKeySaveState());
+    document.getElementById("setup-checkbox-fireworks-fallback")?.addEventListener("change", () => this.updateKeySaveState());
     document.querySelectorAll(".eye-toggle").forEach((button) => {
       button.addEventListener("click", () => {
         const input = document.getElementById(button.dataset.target);
@@ -140,6 +146,19 @@ class MiniColosseumApp {
       this.filterLogs();
     });
     document.getElementById("ledger-cost-header")?.addEventListener("click", () => this.sortLedgerByCost());
+    document.getElementById("ledger-follow-latest")?.addEventListener("change", () => this.renderLedger());
+
+    // The four rows in the Sections view open the matching inspector tab.
+    const goalTargets = {
+      "target-subgoal-1": "details",
+      "target-subgoal-2": "details",
+      "target-subgoal-3": "falsifier",
+      "target-subgoal-4": "falsifier",
+    };
+    Object.entries(goalTargets).forEach(([id, tab]) => {
+      document.getElementById(id)?.addEventListener("click", () => this.openInspectorSection(tab));
+    });
+    document.getElementById("menu-help-about")?.addEventListener("click", () => this.showAbout());
 
     // Editor container reference
     this.docContainer = document.getElementById("document-content");
@@ -218,8 +237,15 @@ class MiniColosseumApp {
     if (toolbarInput && toolbarInput.value !== firstLine) toolbarInput.value = firstLine;
     const main = document.getElementById("status-main-label");
     if (main && !this.currentRunId) main.textContent = title;
+    this.updatePreviewProblem();
+  }
+
+  updatePreviewProblem() {
     const preview = document.getElementById("preview-problem");
-    if (preview) preview.textContent = firstLine || "Enter a problem to begin.";
+    if (!preview) return;
+    const problem = (document.getElementById("input-problem")?.value || document.getElementById("toolbar-problem-title")?.value || "").trim();
+    // Render LaTeX / superscripts / subscripts / symbols readably.
+    preview.innerHTML = problem ? SimpleLaTeXRenderer.toReadable(problem) : "Enter a problem to begin.";
   }
 
   initRenderers() {
@@ -254,6 +280,31 @@ class MiniColosseumApp {
       }
     });
 
+    const resizerPreview = document.getElementById("resizer-preview");
+    const previewPane = document.getElementById("preview-pane");
+    if (resizerPreview && previewPane) {
+      let isResizingPreview = false;
+      resizerPreview.addEventListener("mousedown", (e) => {
+        isResizingPreview = true;
+        document.body.style.cursor = "col-resize";
+        e.preventDefault();
+      });
+      window.addEventListener("mousemove", (e) => {
+        if (!isResizingPreview) return;
+        const left = previewPane.getBoundingClientRect().left;
+        const maxWidth = Math.max(200, window.innerWidth - left - 270);
+        const newWidth = Math.max(180, Math.min(e.clientX - left, maxWidth));
+        previewPane.style.width = `${newWidth}px`;
+        previewPane.style.flex = "none";
+      });
+      window.addEventListener("mouseup", () => {
+        if (isResizingPreview) {
+          isResizingPreview = false;
+          document.body.style.cursor = "default";
+        }
+      });
+    }
+
     const resizerY = document.getElementById("resizer-y");
     const inspectorPane = document.getElementById("inspector-container");
     let isResizingY = false;
@@ -276,42 +327,6 @@ class MiniColosseumApp {
         document.body.style.cursor = "default";
       }
     });
-  }
-
-  selectProblem(key) {
-    if (key === "custom") {
-      this.showModal("modal-run-setup");
-      return;
-    }
-
-    const prob = this.problemsMap[key];
-    if (!prob) return;
-
-    const mainLbl = document.getElementById("status-main-label");
-    if (mainLbl) mainLbl.textContent = `Ready in Predicate_Logic, proving ${prob.title}`;
-    const badgeProb = document.getElementById("badge-problem");
-    if (badgeProb) badgeProb.textContent = `Theorem: ${prob.title}`;
-
-    this.renderInitialScript(prob.coqCode);
-  }
-
-  renderInitialScript(code) {
-    const lines = code.split("\n");
-    let html = "";
-    lines.forEach((line) => {
-      let l = line.replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      l = l.replace(/\b(Theorem|Lemma|Proof|Qed|forall|assert|destruct|pose|intros|apply|exact)\b/g, (m) => {
-        if (m === "Theorem" || m === "Lemma") return `<span style="color:#cc4400; font-weight:bold;">${m}</span>`;
-        if (m === "Proof" || m === "Qed" || m === "forall") return `<span style="color:#0000cc; font-weight:bold;">${m}</span>`;
-        return `<span style="color:#005500;">${m}</span>`;
-      });
-      html += `<div class="coq-line">${l}</div>`;
-    });
-
-    if (this.docContainer) {
-      this.docContainer.innerHTML = html;
-      this.updateGutter(lines.length);
-    }
   }
 
   updateGutter(lineCount) {
@@ -352,6 +367,18 @@ class MiniColosseumApp {
     if (tab === "doc") this.renderDocument();
   }
 
+  // Clicking a row in the Sections view jumps to the tab that explains it.
+  openInspectorSection(tab) {
+    this.switchInspectorTab(tab);
+    const pane = document.getElementById("coq-goals-container");
+    if (pane) pane.scrollTop = 0;
+    if (this.selectedNode) this.highlightDocumentSection(this.selectedNode);
+  }
+
+  showAbout() {
+    alert("Mini-Colosseum v2.0\n\nEnter a problem, run it, and follow each step of the work on the right. Previous runs are kept under File > Previous Runs so you can view them again without running anything new.");
+  }
+
   switchInspectorTab(tab) {
     this.activeInspTab = tab;
     ["goals", "details", "falsifier", "verifier", "hmed", "knowledge"].forEach((t) => {
@@ -376,7 +403,7 @@ class MiniColosseumApp {
     if (!kEl) return;
     const entries = this.currentRunData.knowledge_directory || [];
     if (!entries || entries.length === 0) {
-      kEl.textContent = "No knowledge directory entries recorded yet.";
+      kEl.textContent = "Nothing here yet. Notes from your runs will appear here as they are made; nothing is added in advance.";
       return;
     }
     let text = `=== UNREFUTED KNOWLEDGE DIRECTORY (${entries.length} entries | FR13) ===\n\n`;
@@ -486,6 +513,15 @@ class MiniColosseumApp {
         this.appendLogEntry(ev.timestamp, ev.payload.stage, ev.payload.severity, ev.payload.text, ev.payload.node_id);
         break;
 
+      case "provider_fallback":
+        this.appendLogEntry(ev.timestamp, "all", "warning", `Provider fallback: ${ev.payload.from_provider}/${ev.payload.from_model} -> ${ev.payload.to_provider}/${ev.payload.to_model} (${ev.payload.reason || "provider failure"})`);
+        break;
+
+      case "error":
+        this.appendLogEntry(ev.timestamp, "all", "error", `Run error: ${ev.payload.error || "unknown error"}`);
+        document.getElementById("status-stage-label").textContent = "Stage: FAILED";
+        break;
+
       case "budget_warning":
         this.appendLogEntry(ev.timestamp, "all", "error", `BUDGET CAP REACHED: ${ev.payload.message}`);
         alert(`BUDGET WARNING: ${ev.payload.message}`);
@@ -495,7 +531,10 @@ class MiniColosseumApp {
         this.currentRunData.assembled_latex = ev.payload.assembled_latex || this.currentRunData.assembled_latex;
         this.renderDocument();
         this.appendLogEntry(ev.timestamp, "all", "info", `Run finished. Status: ${ev.payload.status}. Assembled proof complete.`);
-        document.getElementById("status-stage-label").textContent = "Stage: PROVED [Qed]";
+        document.getElementById("status-stage-label").textContent =
+          ev.payload.status === "completed" ? "Stage: PROVED [Qed]" : `Stage: ${(ev.payload.status || "finished").toUpperCase()}`;
+        this.updatePreviewProof();
+        this.refreshBudgetFromServer(true);
         break;
     }
 
@@ -552,12 +591,40 @@ class MiniColosseumApp {
     const sbb = document.getElementById("status-baseten-budget");
     if (sbb) sbb.textContent = `Baseten: $${basetenCost.toFixed(3)} / $100`;
 
+    // Authoritative spend comes from the backend's per-provider accounting
+    // (node costs mix providers, e.g. a falsifier's Meta cost sits on a
+    // Spark node, so summing nodes misattributes spend). Throttled poll.
+    this.refreshBudgetFromServer();
+
     const hardCap = parseFloat(document.getElementById("input-run-budget-cap")?.value || "7");
     const sco = document.getElementById("status-cost");
     if (sco) sco.textContent = `SPEND: $${totalCost.toFixed(3)} / $${hardCap.toFixed(2)}`;
     const referenceSpend = document.getElementById("reference-spend");
     if (referenceSpend) referenceSpend.textContent = `SPEND: $${totalCost.toFixed(2)} / $${hardCap.toFixed(2)}`;
     this.renderLedger();
+  }
+
+  refreshBudgetFromServer(force = false) {
+    const now = Date.now();
+    if (!force && this._budgetFetchAt && now - this._budgetFetchAt < 2000) return;
+    this._budgetFetchAt = now;
+    fetch("/api/budget/pools")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((pools) => {
+        if (!pools) return;
+        const set = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
+        set("status-meta-budget", `Meta: $${pools.meta_usage.toFixed(3)} / $${pools.meta_budget.toFixed(0)}`);
+        set("status-baseten-budget", `Baseten: $${pools.baseten_usage.toFixed(3)} / $${pools.baseten_budget.toFixed(0)}`);
+        set("fireworks-status", `Fireworks: $${pools.fireworks_usage.toFixed(3)} / $${pools.fireworks_budget.toFixed(0)}`);
+        set("status-calls", `Calls: ${pools.calls}`);
+        const tokK = Math.round(((pools.tokens_in || 0) + (pools.tokens_out || 0)) / 1000);
+        const cachedK = Math.round((pools.tokens_cached || 0) / 1000);
+        set("status-tokens", `${tokK}k tok (${cachedK}k cached)`);
+        const hardCap = parseFloat(document.getElementById("input-run-budget-cap")?.value || "7");
+        set("status-cost", `SPEND: $${pools.total_usage.toFixed(3)} / $${hardCap.toFixed(2)}`);
+        set("reference-spend", `SPEND: $${pools.total_usage.toFixed(2)} / $${hardCap.toFixed(2)}`);
+      })
+      .catch(() => { /* keep node-based estimate */ });
   }
 
   openLedger() {
@@ -595,6 +662,10 @@ class MiniColosseumApp {
       row.addEventListener("click", () => this.selectNode(node));
       body.appendChild(row);
     });
+    if (document.getElementById("ledger-follow-latest")?.checked) {
+      const wrap = document.querySelector("#modal-ledger .ledger-table-wrap");
+      if (wrap) wrap.scrollTop = wrap.scrollHeight;
+    }
   }
 
   plainNodeName(node) {
@@ -720,7 +791,13 @@ class MiniColosseumApp {
 
     const outEl = document.getElementById("insp-output-content");
     if (outEl) {
-      let outText = JSON.stringify(out, null, 2);
+      // Show the node's actual math first (claim + proof body), then raw JSON.
+      const bodyText = out.solution_body || out.latex_body || out.body || "";
+      const claimText = out.claimed_result || out.target_claim || "";
+      let outText = "";
+      if (claimText) outText += `Claim: ${claimText}\n\n`;
+      if (bodyText) outText += `${bodyText}\n\n--- Full output (JSON) ---\n`;
+      outText += JSON.stringify(out, null, 2);
       if (node.rollouts && node.rollouts.length > 0) {
         outText = `// Test-Time Scaling: ${node.rollouts.length} Parallel Rollouts\n` + outText;
       }
@@ -836,8 +913,27 @@ class MiniColosseumApp {
     const verifNode = this.currentRunData.nodes.find((n) => n.type === "global_verifier");
     const defects = verifNode && verifNode.output ? verifNode.output.defects || [] : [];
 
+    // If the run stopped before a proof was assembled, show what did
+    // happen (the strategies tried and where it stopped) instead of a blank.
+    let latexForRender = this.currentRunData.assembled_latex;
+    if (!latexForRender && secNodes.length === 0 && this.currentRunData.nodes.length > 0) {
+      const parts = [];
+      this.currentRunData.nodes.forEach((n) => {
+        const out = n.output || {};
+        let main = out.primary_route || out.assessment || out.explanation || out.rationale || "";
+        if (main && typeof main !== "string") main = main.raw || JSON.stringify(main);
+        const claim = out.normalized_problem || out.target_claim || "";
+        if (main || claim) {
+          parts.push(`\\section{${n.label || n.type} (${n.status || ""})}`);
+          if (claim) parts.push(claim);
+          if (main) parts.push(String(main));
+        }
+      });
+      latexForRender = parts.join("\n");
+    }
+
     const rendered = SimpleLaTeXRenderer.renderDocument(
-      this.currentRunData.assembled_latex,
+      latexForRender,
       secNodes,
       defects
     );
@@ -846,6 +942,21 @@ class MiniColosseumApp {
       const lineCount = rendered.split("<div class=\"coq-line").length;
       this.updateGutter(lineCount);
     }
+    this.updatePreviewProof();
+  }
+
+  updatePreviewProof() {
+    const container = document.getElementById("live-preview-content");
+    if (!container) return;
+    let proofEl = document.getElementById("preview-proof");
+    if (!proofEl) {
+      proofEl = document.createElement("div");
+      proofEl.id = "preview-proof";
+      proofEl.className = "preview-proof";
+      container.appendChild(proofEl);
+    }
+    const latex = (this.currentRunData.assembled_latex || "").trim();
+    proofEl.textContent = latex || "Proof text will appear here as sections are solved.";
   }
 
   appendLogEntry(timestamp, stage, severity, text, nodeId = null) {
@@ -899,7 +1010,8 @@ class MiniColosseumApp {
   }
 
   async handleRunAll() {
-    const statement = document.getElementById("input-problem")?.value || "";
+    const statement = document.getElementById("input-problem")?.value || document.getElementById("toolbar-problem-title")?.value || "";
+    this.updatePreviewProblem();
     const hardCap = parseFloat(document.getElementById("input-run-budget-cap")?.value || "7");
     if (!statement.trim() && this.attachments.length === 0) {
       alert("Enter a problem statement or attach a document.");
@@ -917,6 +1029,8 @@ class MiniColosseumApp {
     document.getElementById("event-log-stream").innerHTML = "";
     document.getElementById("status-stage-label").textContent = "Stage: EXPLORING";
 
+    this.setCommandBusy("Starting run", true);
+    document.getElementById("status-stage-label").textContent = "Stage: STARTING…";
     this.appendLogEntry(new Date().toTimeString().slice(0, 8), "all", "info", `Starting Mini-Colosseum v2.0 pipeline on: ${statement.substring(0, 60)}...`);
 
     try {
@@ -925,23 +1039,40 @@ class MiniColosseumApp {
         size: file.size,
         content_base64: this.arrayBufferToBase64(await file.arrayBuffer()),
       })));
-      const res = await fetch("/api/runs/start", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          problem_statement: statement,
-          budget_cap_usd: hardCap,
-          cross_model_review: true,
-          attachments,
-        }),
-      });
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 20000);
+      let res;
+      try {
+        res = await fetch("/api/runs/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({
+            problem_statement: statement,
+            budget_cap_usd: hardCap,
+            cross_model_review: true,
+            attachments,
+          }),
+        });
+      } finally {
+        clearTimeout(timer);
+      }
       const data = await res.json();
       if (!res.ok) {
         throw new Error(data.detail || "Unable to start run");
       }
       this.currentRunId = data.run_id;
+      this.appendLogEntry(new Date().toTimeString().slice(0, 8), "all", "info", `Run started (id ${data.run_id}). Waiting for the first model response…`);
+      this.refreshBudgetFromServer();
     } catch (e) {
-      alert(`Failed to start run: ${e.message || e}`);
+      const msg = e.name === "AbortError"
+        ? "Starting the run timed out after 20s with no reply. The run may not have started; check the messages below."
+        : `Failed to start run: ${e.message || e}`;
+      this.appendLogEntry(new Date().toTimeString().slice(0, 8), "all", "error", msg);
+      document.getElementById("status-stage-label").textContent = "Stage: START FAILED";
+      alert(msg);
+    } finally {
+      this.setCommandBusy("Starting run", false);
     }
   }
 
@@ -1072,13 +1203,10 @@ class MiniColosseumApp {
     this.renderDocument();
 
     if (this.currentRunData.nodes.length > 0) {
-      this.selectNode(this.currentRunData.nodes[0]);
-      const treeNodes = this.currentRunData.nodes.filter(
-        (n) => n.stage === "exploration" || n.type === "explorer" || n.type === "aggregator" || n.type === "gate"
-      );
-      if (treeNodes.length > 0 && this.activeTab === "doc") {
-        setTimeout(() => this.switchTab("tree"), 120);
-      }
+      // Replay lands on the Script view so the saved math is visible at once.
+      const firstSolver = this.currentRunData.nodes.find((n) => n.type === "solver" || n.stage === "solving");
+      this.selectNode(firstSolver || this.currentRunData.nodes[0]);
+      this.switchTab("doc");
     }
   }
 
@@ -1087,8 +1215,7 @@ class MiniColosseumApp {
       alert("No active run to re-explore.");
       return;
     }
-    this.appendLogEntry(new Date().toTimeString().slice(0, 8), "all", "warning", "Triggering manual re-exploration round with failed critique feedback...");
-    await this.apiPost(`/api/runs/${this.currentRunId}/reexplore`);
+    await this.runCommand("Re-explore", `/api/runs/${this.currentRunId}/reexplore`);
   }
 
   exportDirect(type) {
@@ -1134,11 +1261,11 @@ class MiniColosseumApp {
             new Date().toTimeString().slice(0, 8),
             "all",
             "info",
-            `Successfully imported and replayed trace from JSONL: ${resp.run_id}`
+            `Opened saved run: ${resp.run_id}`
           );
         }
       } catch (err) {
-        alert(`Failed to import JSONL trace: ${err}`);
+        alert(`Could not open that saved run: ${err}`);
       }
     };
     reader.readAsText(file);
@@ -1153,7 +1280,7 @@ class MiniColosseumApp {
       const container = document.getElementById("history-runs-list");
       if (!container) return;
       if (!runs || runs.length === 0) {
-        container.innerHTML = `<div style="padding: 10px; color: #888;">No saved runs in SQLite.</div>`;
+        container.innerHTML = `<div style="padding: 10px; color: #888;">No previous runs yet.</div>`;
       } else {
         container.innerHTML = runs
           .map(
@@ -1162,6 +1289,7 @@ class MiniColosseumApp {
             <strong>${escapeHTML(r.run_id)}</strong> - <span style="color:#007700; font-weight:bold;">[${escapeHTML((r.status || "").toUpperCase())}]</span>
             <div><em>${escapeHTML((r.problem || "").substring(0, 75))}...</em></div>
             <div style="font-size: 10px; color: #666;">Date: ${escapeHTML(r.created_at || "")} | Cost: $${(r.cost_usd || 0).toFixed(4)} | Meta: $${(r.cost_meta_usd || 0).toFixed(4)} | Baseten: $${(r.cost_baseten_usd || 0).toFixed(4)}</div>
+            <button class="btn-tool" style="margin-top: 4px;" onclick="event.stopPropagation(); window.app.deleteRun('${escapeHTML(r.run_id)}')">Delete</button>
           </div>
         `
           )
@@ -1170,6 +1298,22 @@ class MiniColosseumApp {
       this.showModal("modal-run-history");
     } catch (e) {
       alert(`Failed to load history: ${e}`);
+    }
+  }
+
+  async deleteRun(runId) {
+    if (!confirm(`Delete saved run ${runId}? This cannot be undone.`)) return;
+    try {
+      const res = await fetch(`/api/runs/${runId}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(`Delete failed (${res.status})`);
+      if (this.currentRunId === runId) {
+        this.currentRunId = null;
+        this.currentRunData = { nodes: [], edges: [], events: [], assembled_latex: "", knowledge_directory: [], hmed_records: [] };
+        this.renderDocument();
+      }
+      await this.openRunHistoryModal();
+    } catch (e) {
+      alert(`Failed to delete run: ${e.message || e}`);
     }
   }
 
@@ -1198,6 +1342,9 @@ class MiniColosseumApp {
     const reasoningEffort = document.getElementById("input-reasoning-effort")?.value || "medium";
     const concurrency = parseInt(document.getElementById("input-concurrency")?.value, 10) || 4;
     const fallbackEnabled = Boolean(document.getElementById("input-baseten-fallback")?.checked);
+    const fireworksKey = document.getElementById("input-fireworks-key")?.value || "";
+    const fireworksUrl = document.getElementById("input-fireworks-url")?.value || "https://api.fireworks.ai/inference/v1";
+    const fireworksEnabled = Boolean(document.getElementById("input-fireworks-fallback")?.checked);
 
     const models = {
       explorer: document.getElementById("input-model-explorer")?.value || "muse-spark-1.3",
@@ -1216,9 +1363,12 @@ class MiniColosseumApp {
       concurrency_limit: concurrency,
       default_models: models,
       baseten_fallback_enabled: fallbackEnabled,
+      fireworks_base_url: fireworksUrl,
+      fireworks_fallback_enabled: fireworksEnabled,
     };
     if (metaKey.trim()) payload.api_key = metaKey.trim();
     if (basetenKey.trim()) payload.baseten_api_key = basetenKey.trim();
+    if (fireworksKey.trim()) payload.fireworks_api_key = fireworksKey.trim();
 
     try {
       const response = await fetch("/api/settings", {
@@ -1255,13 +1405,21 @@ class MiniColosseumApp {
       const metaState = settings.api_key_set ? "ACTIVE" : "OFFLINE";
       let basetenState = "OFFLINE";
       if (settings.baseten_api_key_set && settings.baseten_fallback_enabled) {
-        basetenState = "FALLBACK ACTIVE";
+        basetenState = "ACTIVE";
       } else if (settings.baseten_api_key_set) {
         basetenState = "CONFIGURED";
       }
 
+      let fireworksState = "OFFLINE";
+      if (settings.fireworks_api_key_set && settings.fireworks_fallback_enabled) {
+        fireworksState = "ACTIVE";
+      } else if (settings.fireworks_api_key_set) {
+        fireworksState = "CONFIGURED";
+      }
       const provider = document.getElementById("reference-provider");
-      if (provider) provider.innerHTML = `Meta <b>[${metaState}]</b> · Baseten <b>[${basetenState}]</b>`;
+      if (provider) provider.innerHTML = `Meta <b>[${metaState}]</b> · Baseten <b>[${basetenState}]</b> · Fireworks <b>[${fireworksState}]</b>`;
+      const fwStatus = document.getElementById("fireworks-status");
+      this.refreshBudgetFromServer(true);
 
       // Pre-fill existing settings if available
       if (settings.api_key_masked) {
@@ -1275,6 +1433,14 @@ class MiniColosseumApp {
       const cb = document.getElementById("setup-checkbox-baseten-fallback");
       if (cb) {
         cb.checked = Boolean(settings.baseten_fallback_enabled);
+      }
+      if (settings.fireworks_api_key_masked) {
+        const inp = document.getElementById("setup-input-fireworks-key");
+        if (inp && !inp.value) inp.placeholder = `Configured: ${settings.fireworks_api_key_masked}`;
+      }
+      const fcb = document.getElementById("setup-checkbox-fireworks-fallback");
+      if (fcb) {
+        fcb.checked = Boolean(settings.fireworks_fallback_enabled);
       }
 
       if (!settings.api_key_set) {
@@ -1292,9 +1458,12 @@ class MiniColosseumApp {
     const basetenKey = document.getElementById("setup-input-baseten-key")?.value.trim() || "";
     const fallbackCb = document.getElementById("setup-checkbox-baseten-fallback");
     const fallbackEnabled = fallbackCb ? fallbackCb.checked : false;
+    const fireworksKey = document.getElementById("setup-input-fireworks-key")?.value.trim() || "";
+    const fireworksCb = document.getElementById("setup-checkbox-fireworks-fallback");
+    const fireworksEnabled = fireworksCb ? fireworksCb.checked : false;
 
     const clearErrors = () => {
-      ["meta", "baseten"].forEach((provider) => {
+      ["meta", "baseten", "fireworks"].forEach((provider) => {
         const element = document.getElementById(`setup-${provider}-error`);
         if (element) element.textContent = "";
       });
@@ -1311,7 +1480,9 @@ class MiniColosseumApp {
       // 1. Verify if credentials changed
       let basetenKeyToStore = basetenKey;
       let fallbackToStore = fallbackEnabled;
-      if (metaKey || basetenKey) {
+      let fireworksKeyToStore = fireworksKey;
+      let fireworksToStore = fireworksEnabled;
+      if (metaKey || basetenKey || fireworksKey) {
         const verify = await fetch("/api/keys/verify", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1319,6 +1490,8 @@ class MiniColosseumApp {
             api_key: metaKey,
             baseten_api_key: basetenKey || null,
             baseten_fallback_enabled: fallbackEnabled,
+            fireworks_api_key: fireworksKey || null,
+            fireworks_fallback_enabled: fireworksEnabled,
           }),
         });
         const result = await verify.json();
@@ -1335,6 +1508,12 @@ class MiniColosseumApp {
           basetenKeyToStore = "";
           fallbackToStore = false;
         }
+        if (result.warnings && result.warnings.fireworks) {
+          const element = document.getElementById("setup-fireworks-error");
+          if (element) element.textContent = result.warnings.fireworks;
+          fireworksKeyToStore = "";
+          fireworksToStore = false;
+        }
       }
 
       // 2. Persist
@@ -1346,6 +1525,9 @@ class MiniColosseumApp {
           baseten_api_key: basetenKeyToStore,
           baseten_fallback_enabled: fallbackToStore,
           clear_baseten: basetenKeyToStore === "",
+          fireworks_api_key: fireworksKeyToStore,
+          fireworks_fallback_enabled: fireworksToStore,
+          clear_fireworks: fireworksKeyToStore === "",
         }),
       });
       if (!store.ok) throw new Error("Key storage failed.");
@@ -1382,6 +1564,8 @@ class MiniColosseumApp {
         "input-base-url": settings.base_url,
         "input-baseten-url": settings.baseten_base_url,
         "input-baseten-fallback": Boolean(settings.baseten_fallback_enabled),
+        "input-fireworks-url": settings.fireworks_base_url,
+        "input-fireworks-fallback": Boolean(settings.fireworks_fallback_enabled),
         "input-budget-cap": settings.default_budget_cap,
         "input-reasoning-effort": settings.reasoning_effort,
         "input-concurrency": settings.concurrency_limit,
@@ -1407,6 +1591,14 @@ class MiniColosseumApp {
         metaKeyInput.value = "";
         if (settings.api_key_masked) {
           metaKeyInput.placeholder = `Configured: ${settings.api_key_masked}`;
+        }
+      }
+
+      const fireworksKeyInput = document.getElementById("input-fireworks-key");
+      if (fireworksKeyInput) {
+        fireworksKeyInput.value = "";
+        if (settings.fireworks_api_key_masked) {
+          fireworksKeyInput.placeholder = `Configured: ${settings.fireworks_api_key_masked}`;
         }
       }
 
@@ -1450,8 +1642,8 @@ class MiniColosseumApp {
         );
       }
     } else {
-      // Live mode: send step command to backend
-      this.apiPost("/api/runs/step");
+      // Live mode: send step command to backend (with feedback/timeout)
+      this.runCommand("Step", "/api/runs/step");
       this.appendLogEntry(
         new Date().toTimeString().slice(0, 8), "all", "info",
         "Step: pausing at next stage boundary..."
@@ -1525,12 +1717,62 @@ class MiniColosseumApp {
     this.updateProofPane(replayData);
   }
 
-  async apiPost(url) {
+  async quit() {
+    // Stop token spend first: halt the run, then shut the backend process down.
+    try { await this.apiPost("/api/runs/stop"); } catch (e) { /* shutting down anyway */ }
+    try { if (this.ws) this.ws.close(); } catch (e) { /* ignore */ }
     try {
-      await fetch(url, { method: "POST" });
-    } catch (e) {
-      console.error(e);
+      await fetch("/shutdown", { method: "POST", keepalive: true });
+    } catch (e) { /* backend may already be gone */ }
+    if (window.electronAPI && typeof window.electronAPI.quit === "function") {
+      try { await window.electronAPI.quit(); } catch (e) { /* ignore */ }
     }
+    window.close();
+    setTimeout(() => {
+      if (!window.closed) {
+        document.body.innerHTML = '<div style="font-family: sans-serif; padding: 40px; font-size: 14px;">Mini-Colosseum has stopped. No more API calls will be made. You can close this tab.</div>';
+      }
+    }, 600);
+  }
+
+  setCommandBusy(label, busy) {
+    document.querySelectorAll("[data-run-command]").forEach((b) => { b.disabled = busy; });
+    const main = document.getElementById("status-main-label");
+    if (main && busy) main.textContent = `${label}…`;
+  }
+
+  // Every run command gives instant feedback and reports timeouts instead
+  // of silently hanging.
+  async runCommand(label, url, timeoutMs = 12000) {
+    this.setCommandBusy(label, true);
+    this.appendLogEntry(new Date().toTimeString().slice(0, 8), "all", "info", `${label} requested…`);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, { method: "POST", signal: controller.signal });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || `Server error (${res.status})`);
+      this.appendLogEntry(new Date().toTimeString().slice(0, 8), "all", "info", `${label}: ${data.status || "done"}`);
+      return data;
+    } catch (e) {
+      const msg = e.name === "AbortError"
+        ? `${label} timed out after ${Math.round(timeoutMs / 1000)}s with no reply. It may still be working; check the messages below.`
+        : `${label} failed: ${e.message || e}`;
+      this.appendLogEntry(new Date().toTimeString().slice(0, 8), "all", "error", msg);
+      const stage = document.getElementById("status-stage-label");
+      if (stage && e.name === "AbortError") stage.textContent = `Stage: ${label.toUpperCase()} TIMED OUT`;
+      return null;
+    } finally {
+      clearTimeout(timer);
+      this.setCommandBusy(label, false);
+    }
+  }
+
+  async handlePause() { return this.runCommand("Pause", "/api/runs/pause"); }
+  async handleStop() { return this.runCommand("Stop", "/api/runs/stop"); }
+
+  async apiPost(url) {
+    return this.runCommand("Command", url);
   }
 }
 

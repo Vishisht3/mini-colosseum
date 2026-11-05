@@ -97,7 +97,10 @@ class ReadinessGateEngine:
             "- blocking_issues: list of fatal issues (if any)\n"
             "- obligations: list of objects {id, severity ('minor' or 'major'), assigned_section}\n"
             "- rationale: explanation of the readiness evaluation\n"
-            "Rule: A major obligation or unresolved fatal bridge must trigger decision='explore_more'."
+            "Rule: Obligations are the steps the later writing stage exists to carry out. If the route is sound and every obligation is assigned to a concrete section and is a provable step (including citing and applying a standard theorem with its hypotheses checked in that section), return 'ready_with_obligations' and pass the obligations on. Return 'explore_more' only when the route itself is incomplete or truncated, an obligation has no assigned section, or a bridge claim is false or cannot be proved as stated.\n"
+            "Judge readiness against the strategy's own stated goal: if the goal is to prove stated bounds, "
+            "do not require an exact answer beyond those bounds, and do not treat a hard step as hidden "
+            "when the strategy lists it as an explicit subproblem to be proved."
         )
 
         call_res = await self.client.call(
@@ -126,7 +129,7 @@ class ReadinessGateEngine:
         decision = out.get("decision") or out.get("verdict", "ready")
         # Check for major obligations
         obligations = out.get("obligations", [])
-        has_major = any(o.get("severity") == "major" for o in obligations if isinstance(o, dict))
+        has_major = any(o.get("severity") == "major" and not o.get("assigned_section") for o in obligations if isinstance(o, dict))
 
         if has_major and decision in ["ready", "ready_with_obligations"]:
             decision = "explore_more"

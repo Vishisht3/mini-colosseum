@@ -30,6 +30,10 @@ from .config import (
     BASETEN_API_BASE_URL,
     BASETEN_API_KEY,
     BASETEN_MODEL_ID,
+    FIREWORKS_API_BASE_URL,
+    FIREWORKS_API_KEY,
+    FIREWORKS_MODEL_ID,
+    DEFAULT_FIREWORKS_BUDGET_CAP,
     DEFAULT_RUN_BUDGET_CAP,
     DEFAULT_META_BUDGET_CAP,
     DEFAULT_BASETEN_BUDGET_CAP,
@@ -130,6 +134,10 @@ class ModelClient:
         baseten_api_key: Optional[str] = None,
         baseten_base_url: Optional[str] = None,
         baseten_fallback_enabled: bool = False,
+        fireworks_api_key: Optional[str] = None,
+        fireworks_base_url: Optional[str] = None,
+        fireworks_fallback_enabled: bool = False,
+        budget_cap_fireworks_usd: float = DEFAULT_FIREWORKS_BUDGET_CAP,
         budget_cap_usd: float = DEFAULT_RUN_BUDGET_CAP,
         budget_cap_meta_usd: float = DEFAULT_META_BUDGET_CAP,
         budget_cap_baseten_usd: float = DEFAULT_BASETEN_BUDGET_CAP,
@@ -142,6 +150,10 @@ class ModelClient:
         self.baseten_api_key = baseten_api_key or BASETEN_API_KEY
         self.baseten_base_url = baseten_base_url or BASETEN_API_BASE_URL
         self.baseten_fallback_enabled = baseten_fallback_enabled
+        self.fireworks_api_key = fireworks_api_key or FIREWORKS_API_KEY
+        self.fireworks_base_url = fireworks_base_url or FIREWORKS_API_BASE_URL
+        self.fireworks_fallback_enabled = fireworks_fallback_enabled
+        self.budget_cap_fireworks_usd = budget_cap_fireworks_usd
 
         self.budget_cap_usd = budget_cap_usd
         self.budget_cap_meta_usd = budget_cap_meta_usd
@@ -166,11 +178,16 @@ class ModelClient:
         self.total_baseten_tokens_in = 0
         self.total_baseten_tokens_cached = 0
         self.total_baseten_tokens_out = 0
+        self.cumulative_fireworks_usd = 0.0
+        self.total_fireworks_tokens_in = 0
+        self.total_fireworks_tokens_cached = 0
+        self.total_fireworks_tokens_out = 0
 
         # Concurrency-safe in-flight budget reservations
         self.reserved_cost_usd = 0.0
         self.reserved_meta_usd = 0.0
         self.reserved_baseten_usd = 0.0
+        self.reserved_fireworks_usd = 0.0
         self.warned_80_percent = False
 
         self._lock = None
@@ -178,6 +195,7 @@ class ModelClient:
         # Two independent clients
         self.meta_client = None
         self.baseten_client = None
+        self.fireworks_client = None
 
         if not self.mock_mode:
             try:
@@ -191,6 +209,11 @@ class ModelClient:
                     self.baseten_client = AsyncOpenAI(
                         api_key=self.baseten_api_key,
                         base_url=self.baseten_base_url,
+                    )
+                if self.fireworks_api_key:
+                    self.fireworks_client = AsyncOpenAI(
+                        api_key=self.fireworks_api_key,
+                        base_url=self.fireworks_base_url,
                     )
             except Exception as e:
                 raise RuntimeError(f"Failed to initialize OpenAI client(s): {e}") from e
@@ -210,34 +233,42 @@ class ModelClient:
         """Get typed route configuration for role or explicit model override."""
         base_route = MODEL_ROUTES.get(role)
         if base_route is None:
-            # Default to Meta spark with baseten fallback if unknown drafting role
+            # Unknown drafting role defaults to Meta Spark; Meta is final.
             base_route = RoleRoute(
                 primary=RouteTarget(provider="meta", model="muse-spark-1.3"),
-                fallback=RouteTarget(provider="baseten", model=BASETEN_MODEL_ID),
+                fallback=None,
             )
 
         if not model_override:
+            # Optional provider as primary (existing Baseten behaviour), Meta as fallback.
             if (
-                base_route.fallback is not None
-                and base_route.fallback.provider == "baseten"
+                base_route.primary.provider == "meta"
+                and "wonder" not in base_route.primary.model
                 and self.baseten_fallback_enabled
                 and self.baseten_api_key
             ):
                 return RoleRoute(
-                    primary=base_route.fallback,
+                    primary=RouteTarget(provider="baseten", model=BASETEN_MODEL_ID),
                     fallback=RouteTarget(provider="meta", model=base_route.primary.model)
                     if self._provider_available("meta")
                     else None,
                 )
+            if (
+                base_route.primary.provider == "meta"
+                and "wonder" not in base_route.primary.model
+                and self.fireworks_fallback_enabled
+                and self.fireworks_api_key
+            ):
+                return RoleRoute(
+                    primary=RouteTarget(provider="fireworks", model=FIREWORKS_MODEL_ID),
+                    fallback=RouteTarget(provider="meta", model=base_route.primary.model)
+                    if self._provider_available("meta")
+                    else None,
+                )
+            # Meta is the final provider: no fallback to Baseten/Fireworks.
             return RoleRoute(
                 primary=base_route.primary,
-                fallback=base_route.fallback
-                if (
-                    self.baseten_fallback_enabled
-                    and base_route.fallback is not None
-                    and self._provider_available(base_route.fallback.provider)
-                )
-                else None,
+                fallback=None,
             )
 
         # Handle explicit model override while preserving Wonder constraint
@@ -253,12 +284,18 @@ class ModelClient:
                 if self._provider_available("meta")
                 else None,
             )
+        if model_override == FIREWORKS_MODEL_ID or model_override.startswith("accounts/fireworks/"):
+            return RoleRoute(
+                primary=RouteTarget(provider="fireworks", model=model_override),
+                fallback=RouteTarget(provider="meta", model=base_route.primary.model if "spark" in base_route.primary.model else "muse-spark-1.3")
+                if self._provider_available("meta")
+                else None,
+            )
         if "spark" in model_override:
+            # Explicit Meta model: Meta is final, never fall back to Baseten/Fireworks.
             return RoleRoute(
                 primary=RouteTarget(provider="meta", model=model_override),
-                fallback=RouteTarget(provider="baseten", model=BASETEN_MODEL_ID)
-                if (self.baseten_fallback_enabled and self._provider_available("baseten"))
-                else None,
+                fallback=None,
             )
 
         # Fallback generic: if primary is non-Meta, fallback to Meta API if available
@@ -274,27 +311,43 @@ class ModelClient:
         """Determine routing provider: 'baseten' for Spark Open, 'meta' for Spark 1.3 / Wonder."""
         if "spark-open" in model or model == BASETEN_MODEL_ID or model.startswith("meta-models/"):
             return "baseten"
+        if model == FIREWORKS_MODEL_ID or model.startswith("accounts/fireworks/"):
+            return "fireworks"
         return "meta"
 
     def _provider_available(self, provider: str) -> bool:
         if self.mock_mode:
             return True
-        return (self.meta_client if provider == "meta" else self.baseten_client) is not None
+        clients = {"meta": self.meta_client, "baseten": self.baseten_client, "fireworks": self.fireworks_client}
+        return clients.get(provider) is not None
+
+    def _provider_cap(self, provider: str) -> float:
+        if provider == "baseten":
+            return self.budget_cap_baseten_usd
+        if provider == "fireworks":
+            return self.budget_cap_fireworks_usd
+        return self.budget_cap_meta_usd
 
     def _provider_budget(self, provider: str) -> tuple[float, float]:
         if provider == "baseten":
             return self.cumulative_baseten_usd, self.reserved_baseten_usd
+        if provider == "fireworks":
+            return self.cumulative_fireworks_usd, self.reserved_fireworks_usd
         return self.cumulative_meta_usd, self.reserved_meta_usd
 
     def _reserve_provider_budget(self, provider: str, amount: float) -> None:
         if provider == "baseten":
             self.reserved_baseten_usd += amount
+        elif provider == "fireworks":
+            self.reserved_fireworks_usd += amount
         else:
             self.reserved_meta_usd += amount
 
     def _release_provider_budget(self, provider: str, amount: float) -> None:
         if provider == "baseten":
             self.reserved_baseten_usd = max(0.0, self.reserved_baseten_usd - amount)
+        elif provider == "fireworks":
+            self.reserved_fireworks_usd = max(0.0, self.reserved_fireworks_usd - amount)
         else:
             self.reserved_meta_usd = max(0.0, self.reserved_meta_usd - amount)
 
@@ -333,7 +386,7 @@ class ModelClient:
         reasoning_effort: str = "medium",
         context_hints: Optional[Dict[str, Any]] = None,
     ) -> GenerationResult:
-        """Central inference method implementing primary Meta execution with eligible Baseten fallback."""
+        """Central inference method: optional providers are tried first when enabled; any failure falls back to Meta, and Meta never falls back to them."""
         route = self.get_route(role, model_override=model_override)
         full_prompt = (
             f"=== STABLE PREFIX (CACHED) ===\n{stable_prefix}\n\n"
@@ -359,23 +412,16 @@ class ModelClient:
                     f"Current spend: ${self.cumulative_cost_usd:.4f}, in-flight: ${self.reserved_cost_usd:.4f}"
                 )
 
-            if route.primary.provider == "meta":
-                if (self.cumulative_meta_usd + self.reserved_meta_usd + primary_est_cost) > self.budget_cap_meta_usd:
-                    raise BudgetExceededError(
-                        f"Estimated call would exceed Meta spending cap (${self.budget_cap_meta_usd:.2f})"
-                    )
-            elif route.primary.provider == "baseten":
-                if (self.cumulative_baseten_usd + self.reserved_baseten_usd + primary_est_cost) > self.budget_cap_baseten_usd:
-                    raise BudgetExceededError(
-                        f"Estimated call would exceed Baseten spending cap (${self.budget_cap_baseten_usd:.2f})"
-                    )
+            _pc, _pr = self._provider_budget(route.primary.provider)
+            _cap = self._provider_cap(route.primary.provider)
+            if (_pc + _pr + primary_est_cost) > _cap:
+                raise BudgetExceededError(
+                    f"Estimated call would exceed {route.primary.provider.title()} spending cap (${_cap:.2f})"
+                )
 
             # Reserve primary
             self.reserved_cost_usd += primary_est_cost
-            if route.primary.provider == "baseten":
-                self.reserved_baseten_usd += primary_est_cost
-            else:
-                self.reserved_meta_usd += primary_est_cost
+            self._reserve_provider_budget(route.primary.provider, primary_est_cost)
 
         # Try Primary Execution
         try:
@@ -392,9 +438,9 @@ class ModelClient:
                     max_attempts=3,  # Initial attempt + 2 retries
                 )
         except (RetryableProviderError, NonRetryableProviderError, RuntimeError) as exc:
-            # Check if fallback is eligible:
-            # - Retryable errors can fall back to any configured fallback provider (Meta -> Baseten, or Baseten -> Meta)
-            # - Non-retryable / auth / key / client-missing errors on a non-Meta provider can fall back to Meta API
+            # Fallback policy: Meta is the only fallback target.
+            # Any failure on a non-Meta primary (Baseten/Fireworks) falls back to Meta.
+            # A Meta primary failure never falls back to Baseten/Fireworks.
             logger.warning(f"Primary call ({route.primary.provider}/{route.primary.model}) encountered failure: {exc}")
             is_retryable = isinstance(exc, RetryableProviderError)
             fallback_to_meta_on_key_failure = (
@@ -403,12 +449,10 @@ class ModelClient:
                 and route.fallback.provider == "meta"
             )
             can_fallback = (
-                route.fallback is not None
-                and self._provider_available(route.fallback.provider)
-                and (
-                    (is_retryable and (self.baseten_fallback_enabled or route.fallback.provider == "meta"))
-                    or fallback_to_meta_on_key_failure
-                )
+                route.primary.provider != "meta"
+                and route.fallback is not None
+                and route.fallback.provider == "meta"
+                and self._provider_available("meta")
             )
 
             if not can_fallback:
@@ -426,11 +470,7 @@ class ModelClient:
                         f"Fallback call cost (${fallback_est_cost:.4f}) would exceed run budget cap (${self.budget_cap_usd:.2f})"
                     )
                 fallback_cumulative, fallback_reserved = self._provider_budget(route.fallback.provider)
-                fallback_cap = (
-                    self.budget_cap_baseten_usd
-                    if route.fallback.provider == "baseten"
-                    else self.budget_cap_meta_usd
-                )
+                fallback_cap = self._provider_cap(route.fallback.provider)
                 if (fallback_cumulative + fallback_reserved + fallback_est_cost) > fallback_cap:
                     raise BudgetExceededError(
                         f"Fallback call cost (${fallback_est_cost:.4f}) would exceed {route.fallback.provider.title()} spending cap (${fallback_cap:.2f})"
@@ -455,7 +495,7 @@ class ModelClient:
                 except Exception as fb_err:
                     logger.warning(f"Error calling fallback_callback: {fb_err}")
 
-            # Execute Fallback (bounded 2 attempts on Baseten: initial + 1 retry)
+            # Execute the Meta fallback (bounded 2 attempts: initial + 1 retry)
             try:
                 if self.mock_mode:
                     result = await self._mock_call(
@@ -475,6 +515,22 @@ class ModelClient:
                         fallback_reason=str(exc),
                     )
                 return result
+            except (RetryableProviderError, NonRetryableProviderError, RuntimeError) as fb_exc:
+                # Optional provider failed again: fall back to Meta as last resort.
+                if route.fallback.provider == "meta" or not self._provider_available("meta"):
+                    raise
+                logger.warning(f"Fallback ({route.fallback.provider}) failed ({fb_exc}); falling back to Meta API.")
+                meta_model = route.primary.model if route.primary.provider == "meta" else "muse-spark-1.3"
+                if self.mock_mode:
+                    return await self._mock_call(
+                        role, full_prompt, meta_model, schema, context_hints,
+                        provider="meta", fallback_used=True, fallback_reason=str(fb_exc),
+                    )
+                return await self._execute_provider_with_retry(
+                    provider="meta", model=meta_model, role=role, full_prompt=full_prompt,
+                    schema=schema, reasoning_effort=reasoning_effort, max_attempts=2,
+                    fallback_used=True, fallback_reason=str(fb_exc),
+                )
             finally:
                 async with self.lock:
                     self.reserved_cost_usd = max(0.0, self.reserved_cost_usd - fallback_est_cost)
@@ -482,10 +538,7 @@ class ModelClient:
         finally:
             async with self.lock:
                 self.reserved_cost_usd = max(0.0, self.reserved_cost_usd - primary_est_cost)
-                if route.primary.provider == "baseten":
-                    self.reserved_baseten_usd = max(0.0, self.reserved_baseten_usd - primary_est_cost)
-                else:
-                    self.reserved_meta_usd = max(0.0, self.reserved_meta_usd - primary_est_cost)
+                self._release_provider_budget(route.primary.provider, primary_est_cost)
 
     async def call(
         self,
@@ -532,7 +585,7 @@ class ModelClient:
             NotFoundError,
         )
 
-        client = self.baseten_client if provider == "baseten" else self.meta_client
+        client = {"meta": self.meta_client, "baseten": self.baseten_client, "fireworks": self.fireworks_client}.get(provider, self.meta_client)
         if client is None:
             raise RuntimeError(f"Client for provider '{provider}' is not configured.")
 
@@ -540,6 +593,13 @@ class ModelClient:
             f"You are a Mini-Colosseum research agent acting as '{role}'. "
             "You must strictly return your answer as valid JSON matching the requested schema."
         )
+        if schema is not None:
+            fields = ", ".join(schema.model_fields.keys())
+            system_instruction += (
+                f" Return a single JSON object with exactly these fields: {fields}. "
+                "Text fields must be plain strings (not objects, not lists of objects); "
+                "do not wrap the answer in a 'raw', 'output', or 'result' key."
+            )
         if "spark-open" in model or model == BASETEN_MODEL_ID:
             system_instruction += (
                 " You must structure your output with a top-level '<analysis>' or 'analysis' block "
@@ -565,7 +625,7 @@ class ModelClient:
         if schema is not None:
             kwargs["response_format"] = {"type": "json_object"}
         if provider == "meta" and reasoning_effort and reasoning_effort in ["low", "medium", "high"]:
-            kwargs["reasoning"] = {"effort": reasoning_effort}
+            # SDK accepts reasoning_effort only; a 'reasoning' kwarg raises TypeError.
             kwargs["reasoning_effort"] = reasoning_effort
 
         last_error = None
@@ -631,6 +691,11 @@ class ModelClient:
                 else:
                     raise NonRetryableProviderError(f"API status error {e.status_code} on {provider}: {e}", status_code=e.status_code) from e
             except Exception as e:
+                if isinstance(e, TypeError) and "unexpected keyword" in str(e) and ("reasoning_effort" in kwargs or "reasoning" in kwargs):
+                    logger.warning(f"Provider {provider} SDK rejected reasoning controls. Retrying without them...")
+                    kwargs.pop("reasoning_effort", None)
+                    kwargs.pop("reasoning", None)
+                    continue
                 raise NonRetryableProviderError(f"Unexpected non-retryable error on {provider}: {e}") from e
 
             # Network call succeeded: extract content safely outside retry loop
@@ -639,6 +704,16 @@ class ModelClient:
                 raw_text = message.content or ""
                 if not raw_text.strip() and hasattr(message, "reasoning_content") and message.reasoning_content:
                     raw_text = message.reasoning_content
+
+                if not raw_text.strip():
+                    # Reasoning can consume the whole allowance and leave an
+                    # empty reply: retry with a larger one instead of failing.
+                    if attempt < max_attempts - 1:
+                        kwargs["max_tokens"] = min(16000, int(kwargs.get("max_tokens", 1200) * 2))
+                        logger.warning(f"Empty completion on {provider} ({model}). Retrying with max_tokens={kwargs['max_tokens']}...")
+                        await asyncio.sleep(0.5)
+                        continue
+                    raise RetryableProviderError(f"Model returned an empty completion on {provider} ({model})", status_code=500)
 
                 tokens_in, tokens_cached, tokens_out = safe_extract_usage(response.usage, full_prompt, raw_text)
                 cost = self.compute_cost(model, tokens_in, tokens_cached, tokens_out, provider=provider)
@@ -655,6 +730,11 @@ class ModelClient:
                         self.total_baseten_tokens_in += tokens_in
                         self.total_baseten_tokens_cached += tokens_cached
                         self.total_baseten_tokens_out += tokens_out
+                    elif provider == "fireworks":
+                        self.cumulative_fireworks_usd += cost
+                        self.total_fireworks_tokens_in += tokens_in
+                        self.total_fireworks_tokens_cached += tokens_cached
+                        self.total_fireworks_tokens_out += tokens_out
                     else:
                         self.cumulative_meta_usd += cost
                         self.total_meta_tokens_in += tokens_in
@@ -706,10 +786,51 @@ class ModelClient:
     def _validate_or_repair_schema(
         self, parsed: Dict[str, Any], schema: Type[BaseModel], role: str, raw_text: str
     ) -> Dict[str, Any]:
-        """Strictly validate model output against schema with controlled unwrapping repair."""
+        """Validate model output, preserving raw prose instead of emptying it."""
+        # 0. Non-JSON prose arrives as {"raw": ...}: keep it visible in the
+        # schema's main text field rather than validating into empty defaults.
+        if isinstance(parsed, dict) and isinstance(parsed.get("raw"), str) and parsed["raw"].strip():
+            raw = parsed["raw"].strip()
+            try:
+                inner = json.loads(raw)
+                if isinstance(inner, dict):
+                    return schema.model_validate(inner).model_dump()
+            except Exception:
+                pass
+            for field in ("primary_route", "latex_body", "solution_body", "assessment", "rationale", "summary", "revised_section_body", "normalized_problem"):
+                if field in schema.model_fields:
+                    try:
+                        return schema.model_validate({field: raw}).model_dump()
+                    except Exception:
+                        pass
+
         # 1. Direct validation
         try:
-            return schema.model_validate(parsed).model_dump()
+            result = schema.model_validate(parsed).model_dump()
+            # A reply whose keys match no schema field would otherwise become
+            # an all-defaults (invisible) node: preserve its text instead.
+            if isinstance(parsed, dict) and parsed and not (set(parsed) & set(schema.model_fields)):
+                if not any(result.values()):
+                    for field in ("primary_route", "latex_body", "solution_body", "assessment", "rationale", "summary"):
+                        if field in schema.model_fields:
+                            result[field] = json.dumps(parsed, ensure_ascii=False)
+                            break
+            # An all-empty result may be masking wrapped content (e.g.
+            # {"plan": {...}}): try any nested object before accepting empty.
+            if isinstance(parsed, dict) and not any(result.values()):
+                for key, value in parsed.items():
+                    if isinstance(value, dict):
+                        try:
+                            nested = schema.model_validate(value).model_dump()
+                        except Exception:
+                            continue
+                        if any(nested.values()):
+                            return nested
+                logger.warning(
+                    f"Model reply for role '{role}' validated to an empty {schema.__name__}; "
+                    f"reply keys were: {list(parsed.keys()) if isinstance(parsed, dict) else type(parsed).__name__}"
+                )
+            return result
         except Exception:
             pass
 
@@ -759,6 +880,15 @@ class ModelClient:
         if ctx.get("simulate_baseten_auth_error") and provider == "baseten":
             raise NonRetryableProviderError("Simulated HTTP 401 Invalid Key on Baseten", status_code=401)
 
+        if ctx.get("simulate_fireworks_429") and provider == "fireworks":
+            raise RetryableProviderError("Simulated HTTP 429 Rate Limit on Fireworks", status_code=429)
+
+        if ctx.get("simulate_fireworks_error") and provider == "fireworks":
+            raise RetryableProviderError("Simulated HTTP 500 Internal Server Error on Fireworks", status_code=500)
+
+        if ctx.get("simulate_fireworks_auth_error") and provider == "fireworks":
+            raise NonRetryableProviderError("Simulated HTTP 401 Invalid Key on Fireworks", status_code=401)
+
         if ctx.get("simulate_auth_error"):
             raise NonRetryableProviderError(f"Simulated HTTP 401 Invalid Key on {provider.title()}", status_code=401)
 
@@ -783,6 +913,11 @@ class ModelClient:
                 self.total_baseten_tokens_in += tokens_in
                 self.total_baseten_tokens_cached += tokens_cached
                 self.total_baseten_tokens_out += tokens_out
+            elif provider == "fireworks":
+                self.cumulative_fireworks_usd += cost
+                self.total_fireworks_tokens_in += tokens_in
+                self.total_fireworks_tokens_cached += tokens_cached
+                self.total_fireworks_tokens_out += tokens_out
             else:
                 self.cumulative_meta_usd += cost
                 self.total_meta_tokens_in += tokens_in

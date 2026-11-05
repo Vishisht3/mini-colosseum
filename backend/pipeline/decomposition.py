@@ -180,6 +180,45 @@ class DecompositionEngine:
         if len(subproblems_raw) > 6:
             subproblems_raw = subproblems_raw[:6]
 
+        if not subproblems_raw:
+            # An empty plan must never be "accepted": ask once for a real
+            # list of sections, then fail honestly if none arrives.
+            await self.emit_event(
+                Event(
+                    run_id=run_id,
+                    seq=0,
+                    timestamp=time.strftime("%H:%M:%S"),
+                    event_type="log_line",
+                    payload={
+                        "stage": "decomposition",
+                        "severity": "warning",
+                        "text": "Decomposition returned no sections. Requesting one repair attempt...",
+                        "node_id": dec_node.id,
+                    },
+                )
+            )
+            repair_out, r_in, r_cached, r_out, r_cost = await self.client.call(
+                role="decomposer",
+                prompt=(
+                    f"Problem statement: {problem}\n\n"
+                    "Your previous reply contained no sections. Return a JSON object with a non-empty "
+                    "'subproblems' list of 2 to 6 concrete sections in dependency order. Each item must have: "
+                    "index, title, target_claim, dependencies. Also include 'latex_skeleton' with %% SECTION_BODY_1 %% style placeholders."
+                ),
+                model=model_decomposer,
+                schema=SectionPlan,
+                stable_prefix=knowledge_prefix,
+                reasoning_effort="high",
+            )
+            t_in += r_in
+            t_cached += r_cached
+            t_out += r_out
+            cost += r_cost
+            out = repair_out
+            subproblems_raw = out.get("subproblems", [])[:6]
+            if not subproblems_raw:
+                raise RuntimeError("Decomposition produced no sections, so no proof could be written.")
+
         try:
             topo_order = self.validate_acyclic(subproblems_raw)
         except CycleDetectedError as err:

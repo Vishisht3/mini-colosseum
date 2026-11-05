@@ -46,6 +46,10 @@ from .config import (
     BASETEN_API_BASE_URL,
     BASETEN_API_KEY,
     BASETEN_MODEL_ID,
+    FIREWORKS_API_BASE_URL,
+    FIREWORKS_API_KEY,
+    FIREWORKS_MODEL_ID,
+    DEFAULT_FIREWORKS_BUDGET_CAP,
     DEFAULT_RUN_BUDGET_CAP,
     DEFAULT_META_BUDGET_CAP,
     DEFAULT_BASETEN_BUDGET_CAP,
@@ -199,6 +203,10 @@ server_settings = {
     "baseten_api_key": BASETEN_API_KEY,
     "baseten_base_url": BASETEN_API_BASE_URL,
     "baseten_fallback_enabled": False,
+    "fireworks_api_key": FIREWORKS_API_KEY,
+    "fireworks_base_url": FIREWORKS_API_BASE_URL,
+    "fireworks_fallback_enabled": False,
+    "budget_cap_fireworks_usd": DEFAULT_FIREWORKS_BUDGET_CAP,
     "default_budget_cap": DEFAULT_RUN_BUDGET_CAP,
     "budget_cap_meta_usd": DEFAULT_META_BUDGET_CAP,
     "budget_cap_baseten_usd": DEFAULT_BASETEN_BUDGET_CAP,
@@ -215,13 +223,20 @@ _stored_baseten = _keychain_get("mini-colosseum", "baseten_api_key")
 if _stored_baseten:
     server_settings["baseten_api_key"] = _stored_baseten
     server_settings["baseten_fallback_enabled"] = True
+_stored_fireworks = _keychain_get("mini-colosseum", "fireworks_api_key")
+if _stored_fireworks:
+    server_settings["fireworks_api_key"] = _stored_fireworks
+    server_settings["fireworks_fallback_enabled"] = True
 
 
 class KeyPayload(BaseModel):
     api_key: Optional[str] = None
     baseten_api_key: Optional[str] = None
     baseten_fallback_enabled: Optional[bool] = None
+    fireworks_api_key: Optional[str] = None
+    fireworks_fallback_enabled: Optional[bool] = None
     clear_baseten: Optional[bool] = False
+    clear_fireworks: Optional[bool] = False
     service: Optional[str] = "mini-colosseum"
 
 
@@ -229,6 +244,8 @@ class KeyVerificationPayload(BaseModel):
     api_key: str
     baseten_api_key: Optional[str] = None
     baseten_fallback_enabled: Optional[bool] = False
+    fireworks_api_key: Optional[str] = None
+    fireworks_fallback_enabled: Optional[bool] = False
 
 
 async def _verify_provider_key(base_url: str, api_key: str, model: str) -> Optional[str]:
@@ -267,6 +284,11 @@ async def verify_meta_key(api_key: str) -> Optional[str]:
     return None
 
 
+async def verify_fireworks_key(api_key: str) -> Optional[str]:
+    """Verify Fireworks key on the configured Fireworks model."""
+    return await _verify_provider_key(FIREWORKS_API_BASE_URL, api_key, FIREWORKS_MODEL_ID)
+
+
 async def verify_baseten_key(api_key: str) -> Optional[str]:
     """Verify Baseten hackathon model: meta-models/muse-spark-open-1026."""
     return await _verify_provider_key(BASETEN_API_BASE_URL, api_key, BASETEN_MODEL_ID)
@@ -299,6 +321,17 @@ async def verify_keys(req: KeyVerificationPayload):
         else:
             baseten_verified = True
 
+    fireworks_verified = False
+    if req.fireworks_api_key and req.fireworks_api_key.strip():
+        fireworks_error = await verify_fireworks_key(req.fireworks_api_key.strip())
+        if fireworks_error:
+            if not meta_error:
+                warnings["fireworks"] = f"{fireworks_error} Falling back to Meta API."
+            else:
+                errors["fireworks"] = fireworks_error
+        else:
+            fireworks_verified = True
+
     if errors:
         return JSONResponse({"errors": errors, "warnings": warnings}, status_code=400)
 
@@ -314,6 +347,16 @@ async def verify_keys(req: KeyVerificationPayload):
                 "warning": warnings.get("baseten"),
             }
             if req.baseten_api_key and req.baseten_api_key.strip()
+            else {"verified": False, "skipped": True}
+        ),
+        "fireworks": (
+            {
+                "verified": fireworks_verified,
+                "model": FIREWORKS_MODEL_ID,
+                "fallback_to_meta": not fireworks_verified,
+                "warning": warnings.get("fireworks"),
+            }
+            if req.fireworks_api_key and req.fireworks_api_key.strip()
             else {"verified": False, "skipped": True}
         ),
     }
@@ -377,6 +420,34 @@ async def delete_baseten_provider_key():
     return {"status": "deleted", "provider": "baseten"}
 
 
+@app.post("/api/providers/fireworks/verify")
+async def verify_fireworks_provider(req: ProviderKeyPayload):
+    """Explicitly verify Fireworks fallback key."""
+    err = await verify_fireworks_key(req.api_key.strip())
+    if err:
+        return JSONResponse({"verified": False, "error": err}, status_code=400)
+    return {"verified": True, "provider": "fireworks", "model": FIREWORKS_MODEL_ID}
+
+
+@app.put("/api/providers/fireworks")
+async def set_fireworks_provider_key(req: ProviderKeyPayload):
+    """Store Fireworks API key in memory and OS keychain."""
+    f_key = req.api_key.strip()
+    server_settings["fireworks_api_key"] = f_key
+    server_settings["fireworks_fallback_enabled"] = bool(f_key)
+    _keychain_set("mini-colosseum", "fireworks_api_key", f_key)
+    return {"status": "stored", "provider": "fireworks"}
+
+
+@app.delete("/api/providers/fireworks")
+async def delete_fireworks_provider_key():
+    """Delete Fireworks API key from memory and OS keychain."""
+    server_settings["fireworks_api_key"] = ""
+    server_settings["fireworks_fallback_enabled"] = False
+    _keychain_delete("mini-colosseum", "fireworks_api_key")
+    return {"status": "deleted", "provider": "fireworks"}
+
+
 @app.put("/key")
 async def set_key(req: KeyPayload):
     """
@@ -399,6 +470,18 @@ async def set_key(req: KeyPayload):
 
     if req.baseten_fallback_enabled is not None:
         server_settings["baseten_fallback_enabled"] = bool(req.baseten_fallback_enabled)
+
+    if req.clear_fireworks or (req.fireworks_api_key is not None and not req.fireworks_api_key.strip()):
+        server_settings["fireworks_api_key"] = ""
+        server_settings["fireworks_fallback_enabled"] = False
+        _keychain_delete("mini-colosseum", "fireworks_api_key")
+    elif req.fireworks_api_key is not None and req.fireworks_api_key.strip():
+        f_key = req.fireworks_api_key.strip()
+        server_settings["fireworks_api_key"] = f_key
+        _keychain_set("mini-colosseum", "fireworks_api_key", f_key)
+
+    if req.fireworks_fallback_enabled is not None:
+        server_settings["fireworks_fallback_enabled"] = bool(req.fireworks_fallback_enabled)
 
     return {"status": "key_stored"}
 
@@ -466,6 +549,7 @@ class StartRunRequest(BaseModel):
     budget_cap_usd: float = DEFAULT_RUN_BUDGET_CAP
     budget_cap_meta_usd: float = DEFAULT_META_BUDGET_CAP
     budget_cap_baseten_usd: float = DEFAULT_BASETEN_BUDGET_CAP
+    budget_cap_fireworks_usd: float = DEFAULT_FIREWORKS_BUDGET_CAP
     max_rounds: int = 2
     cross_model_review: bool = True
     mock_mode: bool = False
@@ -550,6 +634,8 @@ async def start_run(req: StartRunRequest):
 
         baseten_key = server_settings.get("baseten_api_key") or None
         fallback_enabled = bool(server_settings.get("baseten_fallback_enabled", False)) and bool(baseten_key)
+        fireworks_key = server_settings.get("fireworks_api_key") or None
+        fireworks_enabled = bool(server_settings.get("fireworks_fallback_enabled", False)) and bool(fireworks_key)
 
         config = RunConfig(
             problem_statement=statement,
@@ -561,9 +647,12 @@ async def start_run(req: StartRunRequest):
             budget_cap_usd=req.budget_cap_usd,
             budget_cap_meta_usd=req.budget_cap_meta_usd,
             budget_cap_baseten_usd=req.budget_cap_baseten_usd,
+            budget_cap_fireworks_usd=req.budget_cap_fireworks_usd,
             max_rounds=req.max_rounds,
             baseten_base_url=server_settings.get("baseten_base_url"),
             baseten_fallback_enabled=fallback_enabled,
+            fireworks_base_url=server_settings.get("fireworks_base_url"),
+            fireworks_fallback_enabled=fireworks_enabled,
             mock_mode=mock_mode,
         )
 
@@ -579,9 +668,13 @@ async def start_run(req: StartRunRequest):
             baseten_api_key=baseten_key,
             baseten_base_url=server_settings.get("baseten_base_url"),
             baseten_fallback_enabled=fallback_enabled,
+            fireworks_api_key=fireworks_key,
+            fireworks_base_url=server_settings.get("fireworks_base_url"),
+            fireworks_fallback_enabled=fireworks_enabled,
             budget_cap_usd=req.budget_cap_usd,
             budget_cap_meta_usd=req.budget_cap_meta_usd,
             budget_cap_baseten_usd=req.budget_cap_baseten_usd,
+            budget_cap_fireworks_usd=req.budget_cap_fireworks_usd,
             mock_mode=mock_mode,
         )
 
@@ -652,6 +745,19 @@ async def reexplore_run(run_id: Optional[str] = None):
         active_orchestrator.trigger_reexplore()
         return {"status": "reexplore_triggered", "run_id": active_orchestrator.run_id}
     return {"status": "no_active_run"}
+
+
+@app.delete("/api/runs/{run_id}")
+async def delete_run(run_id: str):
+    """Delete a saved run and its trace (user-controlled history cleanup)."""
+    global active_orchestrator, active_task
+    if active_orchestrator and active_orchestrator.run_id == run_id:
+        active_orchestrator.stop()
+        if active_task and not active_task.done():
+            active_task.cancel()
+    if not store.delete_run(run_id):
+        raise HTTPException(status_code=404, detail="Run not found")
+    return {"status": "deleted", "run_id": run_id}
 
 
 @app.get("/api/runs/{run_id}")
@@ -790,10 +896,12 @@ async def get_budget_pools():
     client = getattr(active_orchestrator, "client", None) if active_orchestrator else None
     meta_spent = client.cumulative_meta_usd if client else 0.0
     baseten_spent = client.cumulative_baseten_usd if client else 0.0
+    fireworks_spent = getattr(client, "cumulative_fireworks_usd", 0.0) if client else 0.0
     total_spent = client.cumulative_cost_usd if client else 0.0
     run_cap = client.budget_cap_usd if client else float(server_settings.get("default_budget_cap", 7.0))
     meta_cap = client.budget_cap_meta_usd if client else float(server_settings.get("budget_cap_meta_usd", 150.0))
     baseten_cap = client.budget_cap_baseten_usd if client else float(server_settings.get("budget_cap_baseten_usd", 100.0))
+    fireworks_cap = getattr(client, "budget_cap_fireworks_usd", DEFAULT_FIREWORKS_BUDGET_CAP) if client else float(server_settings.get("budget_cap_fireworks_usd", DEFAULT_FIREWORKS_BUDGET_CAP))
 
     return {
         "meta": {
@@ -812,6 +920,14 @@ async def get_budget_pools():
             "remaining": round(max(0.0, baseten_cap - baseten_spent), 4),
             "currency": "USD",
         },
+        "fireworks": {
+            "name": "Fireworks Fallback",
+            "pool": fireworks_cap,
+            "budget": fireworks_cap,
+            "spent": round(fireworks_spent, 4),
+            "remaining": round(max(0.0, fireworks_cap - fireworks_spent), 4),
+            "currency": "USD",
+        },
         "run": {
             "spent": round(total_spent, 4),
             "cap": round(run_cap, 2),
@@ -820,10 +936,16 @@ async def get_budget_pools():
         # Explicit metrics
         "meta_usage": round(meta_spent, 4),
         "baseten_usage": round(baseten_spent, 4),
+        "fireworks_usage": round(fireworks_spent, 4),
         "total_usage": round(total_spent, 4),
         "run_budget": round(run_cap, 2),
         "meta_budget": round(meta_cap, 2),
         "baseten_budget": round(baseten_cap, 2),
+        "fireworks_budget": round(fireworks_cap, 2),
+        "calls": client.total_calls if client else 0,
+        "tokens_in": client.total_tokens_in if client else 0,
+        "tokens_cached": client.total_tokens_cached if client else 0,
+        "tokens_out": client.total_tokens_out if client else 0,
     }
 
 
@@ -838,6 +960,10 @@ async def get_settings():
     if server_settings.get("baseten_api_key"):
         raw = server_settings["baseten_api_key"]
         masked_baseten = (raw[:4] + "..." + raw[-4:]) if len(raw) > 8 else "***"
+    masked_fireworks = ""
+    if server_settings.get("fireworks_api_key"):
+        raw = server_settings["fireworks_api_key"]
+        masked_fireworks = (raw[:4] + "..." + raw[-4:]) if len(raw) > 8 else "***"
 
     return {
         "api_key_set": bool(server_settings.get("api_key")),
@@ -847,6 +973,11 @@ async def get_settings():
         "baseten_api_key_masked": masked_baseten,
         "baseten_fallback_enabled": bool(server_settings.get("baseten_fallback_enabled", False)),
         "baseten_base_url": server_settings.get("baseten_base_url", BASETEN_API_BASE_URL),
+        "fireworks_api_key_set": bool(server_settings.get("fireworks_api_key")),
+        "fireworks_api_key_masked": masked_fireworks,
+        "fireworks_fallback_enabled": bool(server_settings.get("fireworks_fallback_enabled", False)),
+        "fireworks_base_url": server_settings.get("fireworks_base_url", FIREWORKS_API_BASE_URL),
+        "budget_cap_fireworks_usd": server_settings.get("budget_cap_fireworks_usd", DEFAULT_FIREWORKS_BUDGET_CAP),
         "default_budget_cap": server_settings.get("default_budget_cap", DEFAULT_RUN_BUDGET_CAP),
         "budget_cap_meta_usd": server_settings.get("budget_cap_meta_usd", DEFAULT_META_BUDGET_CAP),
         "budget_cap_baseten_usd": server_settings.get("budget_cap_baseten_usd", DEFAULT_BASETEN_BUDGET_CAP),
@@ -863,6 +994,10 @@ class SettingsUpdateRequest(BaseModel):
     baseten_api_key: Optional[str] = None
     baseten_base_url: Optional[str] = None
     baseten_fallback_enabled: Optional[bool] = None
+    fireworks_api_key: Optional[str] = None
+    fireworks_base_url: Optional[str] = None
+    fireworks_fallback_enabled: Optional[bool] = None
+    budget_cap_fireworks_usd: Optional[float] = None
     default_budget_cap: Optional[float] = None
     budget_cap_meta_usd: Optional[float] = None
     budget_cap_baseten_usd: Optional[float] = None
@@ -894,6 +1029,18 @@ async def update_settings(req: SettingsUpdateRequest):
 
     if req.baseten_base_url is not None:
         server_settings["baseten_base_url"] = req.baseten_base_url.strip()
+    if req.fireworks_api_key is not None:
+        f_key = req.fireworks_api_key.strip()
+        server_settings["fireworks_api_key"] = f_key
+        _keychain_set("mini-colosseum", "fireworks_api_key", f_key)
+        if not f_key:
+            server_settings["fireworks_fallback_enabled"] = False
+    if req.fireworks_fallback_enabled is not None:
+        server_settings["fireworks_fallback_enabled"] = bool(req.fireworks_fallback_enabled)
+    if req.fireworks_base_url is not None:
+        server_settings["fireworks_base_url"] = req.fireworks_base_url.strip()
+    if req.budget_cap_fireworks_usd is not None:
+        server_settings["budget_cap_fireworks_usd"] = req.budget_cap_fireworks_usd
     if req.default_budget_cap is not None:
         server_settings["default_budget_cap"] = req.default_budget_cap
     if req.budget_cap_meta_usd is not None:

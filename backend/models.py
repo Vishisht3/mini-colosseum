@@ -10,7 +10,7 @@ Implements:
 """
 
 from typing import List, Dict, Any, Optional, Literal, Union
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 import time
 import uuid
 
@@ -63,6 +63,46 @@ EventType = Literal[
 ]
 
 
+def _as_text(value: Any) -> str:
+    """Coerce model output (str, list of steps, dict, number) into plain text."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (list, tuple)):
+        return "\n".join(_as_text(item) for item in value)
+    if isinstance(value, dict):
+        return "; ".join(f"{key}: {_as_text(val)}" for key, val in value.items())
+    return str(value)
+
+
+def _as_text_list(value: Any) -> List[str]:
+    """Coerce model output (single string or mixed list) into a list of strings."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, (list, tuple)):
+        return [_as_text(item) for item in value]
+    return [_as_text(value)]
+
+
+def _norm_enum(data: dict, field: str, mapping: dict) -> None:
+    """Normalize an enum field in-place: case/space/hyphen-insensitive, with synonyms."""
+    value = data.get(field)
+    if isinstance(value, str):
+        key = value.strip().lower().replace("-", "_").replace(" ", "_")
+        if key in mapping:
+            data[field] = mapping[key]
+
+
+_SEVERITY_MAP = {
+    "fatal": "fatal", "major": "major", "minor": "minor",
+    "unverified_warning": "unverified_warning", "warning": "unverified_warning",
+    "critical": "fatal", "high": "major", "low": "minor",
+}
+
+
 class ASearcherAnalysis(BaseModel):
     """
     ASearcher (Structured Analysis Block):
@@ -72,6 +112,20 @@ class ASearcherAnalysis(BaseModel):
     available_info: str = ""
     plan: str = ""
     uncertainties: List[str] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_text(cls, data: Any) -> Any:
+        if isinstance(data, str):
+            return {"plan": data}
+        if isinstance(data, dict):
+            data = dict(data)
+            for field in ("available_info", "plan"):
+                if field in data:
+                    data[field] = _as_text(data[field])
+            if "uncertainties" in data:
+                data["uncertainties"] = _as_text_list(data["uncertainties"])
+        return data
 
 
 class PrimaryRouteDetail(BaseModel):
@@ -93,6 +147,15 @@ class Objection(BaseModel):
     quote_verified: bool = True
 
 
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_severity(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            data = dict(data)
+            _norm_enum(data, "severity", _SEVERITY_MAP)
+        return data
+
+
 class FalsifierReport(BaseModel):
     """Appendix A: Falsifier report output schema."""
     verdict: Literal["survives", "needs_repair", "reject", "falsified"] = "survives"
@@ -110,6 +173,34 @@ class FalsifierReport(BaseModel):
     decisive_tests: List[str] = Field(default_factory=list)
     unresolved_objections: List[str] = Field(default_factory=list)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            data = dict(data)
+            for field in ("objections", "categorized_objections"):
+                if isinstance(data.get(field), str):
+                    data[field] = [{"claim": data[field]}]
+                elif isinstance(data.get(field), dict):
+                    data[field] = [data[field]]
+                elif isinstance(data.get(field), (list, tuple)):
+                    data[field] = [
+                        item if isinstance(item, dict) else {"claim": _as_text(item)}
+                        for item in data[field]
+                    ]
+            _norm_enum(data, "verdict", {
+                "survives": "survives", "survive": "survives", "pass": "survives", "accepted": "survives",
+                "needs_repair": "needs_repair", "repair": "needs_repair",
+                "reject": "reject", "rejected": "reject", "fail": "reject",
+                "falsified": "falsified", "false": "falsified",
+            })
+            if "assessment" in data:
+                data["assessment"] = _as_text(data["assessment"])
+            for field in ("unresolved_to_preserve", "minimal_weakenings", "dropped_objections", "weakest_lemmas", "hidden_assumptions", "boundary_cases", "theorem_misuse", "decisive_tests", "unresolved_objections"):
+                if field in data:
+                    data[field] = _as_text_list(data[field])
+        return data
+
 
 class StrategyCard(BaseModel):
     """Appendix A: Strategy card output schema."""
@@ -125,6 +216,41 @@ class StrategyCard(BaseModel):
     risky_lemmas: List[str] = Field(default_factory=list)
     preserved_critiques: List[Dict[str, Any]] = Field(default_factory=list)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            data = dict(data)
+            # Models often return routes/obligations as a list of steps or a single string.
+            if isinstance(data.get("primary_route"), (list, tuple)):
+                data["primary_route"] = _as_text(data["primary_route"])
+            if isinstance(data.get("primary_route"), dict):
+                route = data["primary_route"]
+                if "raw" in route:
+                    data["primary_route"] = _as_text(route.get("raw"))
+                elif not any(route.get(k) for k in ("mechanism", "reduction", "evidence", "lemmas")):
+                    data["primary_route"] = _as_text(route)
+            if isinstance(data.get("analysis"), str):
+                data["analysis"] = {"plan": data["analysis"]}
+            elif isinstance(data.get("analysis"), (list, tuple)):
+                data["analysis"] = {"available_info": _as_text(data["analysis"])}
+            for field in ("normalized_problem", "first_hard_obstruction", "next_task", "concrete_next_task", "readiness_assessment"):
+                if field in data:
+                    data[field] = _as_text(data[field])
+            for field in ("active_obligations", "risky_lemmas"):
+                if field in data:
+                    data[field] = _as_text_list(data[field])
+            if isinstance(data.get("backup_routes"), (str, dict)):
+                data["backup_routes"] = [data["backup_routes"]]
+            if isinstance(data.get("preserved_critiques"), str):
+                data["preserved_critiques"] = [{"claim": data["preserved_critiques"]}]
+            elif "preserved_critiques" in data and isinstance(data["preserved_critiques"], (list, tuple)):
+                data["preserved_critiques"] = [
+                    item if isinstance(item, dict) else {"claim": _as_text(item)}
+                    for item in data["preserved_critiques"]
+                ]
+        return data
+
 
 class GateObligation(BaseModel):
     """Appendix A: Gate obligations[] {id, severity (minor, major), assigned_section}."""
@@ -133,12 +259,38 @@ class GateObligation(BaseModel):
     assigned_section: Optional[int] = None
 
 
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_severity(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            data = dict(data)
+            _norm_enum(data, "severity", _SEVERITY_MAP)
+        return data
+
+
 class GateDecision(BaseModel):
     """Appendix A: Gate decision output schema."""
     decision: Literal["ready", "ready_with_obligations", "explore_more", "reject"] = "ready"
     blocking_issues: List[str] = Field(default_factory=list)
     obligations: List[GateObligation] = Field(default_factory=list)
     rationale: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            data = dict(data)
+            _norm_enum(data, "decision", {
+                "ready": "ready", "accept": "ready", "accepted": "ready",
+                "ready_with_obligations": "ready_with_obligations", "conditional": "ready_with_obligations",
+                "explore_more": "explore_more", "explore": "explore_more", "needs_further_exploration": "explore_more",
+                "reject": "reject", "rejected": "reject",
+            })
+            if "blocking_issues" in data:
+                data["blocking_issues"] = _as_text_list(data["blocking_issues"])
+            if "rationale" in data:
+                data["rationale"] = _as_text(data["rationale"])
+        return data
 
 
 class SectionSolution(BaseModel):
@@ -150,12 +302,46 @@ class SectionSolution(BaseModel):
     open_obligations: List[str] = Field(default_factory=list)
     analysis: Optional[ASearcherAnalysis] = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            data = dict(data)
+            _norm_enum(data, "status", {
+                "solved": "solved", "complete": "solved", "completed": "solved", "done": "solved", "accepted": "solved",
+                "partial": "partial", "partially_solved": "partial",
+                "blocked": "blocked", "failed": "blocked", "reject": "blocked", "rejected": "blocked",
+            })
+            for field in ("latex_body", "claimed_result"):
+                if field in data:
+                    data[field] = _as_text(data[field])
+            for field in ("bridge_claims", "open_obligations"):
+                if field in data:
+                    data[field] = _as_text_list(data[field])
+        return data
+
 
 class SectionReview(BaseModel):
     """Appendix A: Section review output schema."""
     verdict: Literal["ready", "conditional", "rejected"] = "ready"
     fatal_objections: List[Union[str, Dict[str, Any]]] = Field(default_factory=list)
     claims_not_established: List[str] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            data = dict(data)
+            _norm_enum(data, "verdict", {
+                "ready": "ready", "accept": "ready", "accepted": "ready",
+                "conditional": "conditional",
+                "rejected": "rejected", "reject": "rejected",
+            })
+            if "claims_not_established" in data:
+                data["claims_not_established"] = _as_text_list(data["claims_not_established"])
+            if isinstance(data.get("fatal_objections"), str):
+                data["fatal_objections"] = [data["fatal_objections"]]
+        return data
 
 
 class GlobalDefect(BaseModel):
@@ -172,6 +358,27 @@ class GlobalVerdict(BaseModel):
     verdict: Literal["accept", "reject", "accepted", "rejected"] = "accept"
     defects: List[Union[GlobalDefect, Dict[str, Any]]] = Field(default_factory=list)
     next_action: Literal["revise", "re_explore", "accept"] = "accept"
+
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_enums(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            data = dict(data)
+            if isinstance(data.get("defects"), str):
+                data["defects"] = [{"description": data["defects"]}]
+            elif isinstance(data.get("defects"), dict):
+                data["defects"] = [data["defects"]]
+            _norm_enum(data, "verdict", {
+                "accept": "accept", "accepted": "accept",
+                "reject": "reject", "rejected": "reject",
+            })
+            _norm_enum(data, "next_action", {
+                "revise": "revise", "revision": "revise",
+                "re_explore": "re_explore", "reexplore": "re_explore", "explore": "re_explore",
+                "accept": "accept", "accepted": "accept", "done": "accept",
+            })
+        return data
 
 
 class RevisionOutput(BaseModel):
@@ -205,6 +412,57 @@ class SectionPlan(BaseModel):
     subproblems: List[SubproblemSpec] = Field(default_factory=list)
     latex_skeleton: str = ""
 
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            data = dict(data)
+            for wrap_key in ("plan", "decomposition", "section_plan", "output", "result", "content"):
+                inner = data.get(wrap_key)
+                if isinstance(inner, dict) and ("subproblems" in inner or "sections" in inner):
+                    merged = dict(inner)
+                    merged.update({k: v for k, v in data.items() if k != wrap_key})
+                    data = merged
+                    break
+            raw_items = None
+            for key in ("subproblems", "sections", "sub_problems", "tasks", "steps"):
+                if isinstance(data.get(key), (list, tuple)) and data[key]:
+                    raw_items = list(data[key])
+                    break
+            if raw_items is None and isinstance(data.get("subproblems"), (list, tuple)):
+                raw_items = list(data["subproblems"])
+            if raw_items is not None:
+                items = []
+                for pos, item in enumerate(raw_items, start=1):
+                    if isinstance(item, str):
+                        item = {"title": item, "target_claim": item}
+                    if isinstance(item, dict):
+                        item = dict(item)
+                        index = item.get("index") or pos
+                        item["index"] = index
+                        if not item.get("id"):
+                            item["id"] = f"SEC_{index}"
+                        if not item.get("title"):
+                            item["title"] = item.get("name") or item.get("section") or f"Section {index}"
+                        if not item.get("target_claim"):
+                            item["target_claim"] = item.get("claim") or item.get("target") or item.get("goal") or item.get("description") or item.get("title")
+                        deps = item.get("dependencies")
+                        if isinstance(deps, (int, str)):
+                            deps = [deps]
+                        if isinstance(deps, (list, tuple)):
+                            coerced = []
+                            for d in deps:
+                                try:
+                                    coerced.append(int(d))
+                                except (TypeError, ValueError):
+                                    pass
+                            item["dependencies"] = coerced
+                    items.append(item)
+                data["subproblems"] = items
+            if "latex_skeleton" in data:
+                data["latex_skeleton"] = _as_text(data["latex_skeleton"])
+        return data
+
 
 class Defect(BaseModel):
     section_index: Optional[int] = None
@@ -220,12 +478,42 @@ class Defect(BaseModel):
     downgraded_warning: bool = False
 
 
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_severity(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            data = dict(data)
+            _norm_enum(data, "severity", _SEVERITY_MAP)
+        return data
+
+
 class VerificationReport(BaseModel):
     verdict: Literal["accepted", "conditional", "rejected"] = "accepted"
     defects: List[Defect] = Field(default_factory=list)
     downgraded_warnings: List[Defect] = Field(default_factory=list)
     summary: str = ""
     unresolved_objections_preserved: List[str] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            data = dict(data)
+            for field in ("defects", "downgraded_warnings"):
+                if isinstance(data.get(field), str):
+                    data[field] = [{"description": data[field]}]
+                elif isinstance(data.get(field), dict):
+                    data[field] = [data[field]]
+            _norm_enum(data, "verdict", {
+                "accepted": "accepted", "accept": "accepted",
+                "conditional": "conditional",
+                "rejected": "rejected", "reject": "rejected",
+            })
+            if "summary" in data:
+                data["summary"] = _as_text(data["summary"])
+            if "unresolved_objections_preserved" in data:
+                data["unresolved_objections_preserved"] = _as_text_list(data["unresolved_objections_preserved"])
+        return data
     exact_quotes_checked: int = 0
     exact_quotes_passed: int = 0
 
@@ -345,3 +633,6 @@ class RunConfig(BaseModel):
     mock_mode: bool = False
     baseten_base_url: Optional[str] = None
     baseten_fallback_enabled: bool = False
+    fireworks_base_url: Optional[str] = None
+    fireworks_fallback_enabled: bool = False
+    budget_cap_fireworks_usd: float = 100.0

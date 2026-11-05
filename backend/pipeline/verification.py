@@ -88,6 +88,43 @@ class GlobalVerificationEngine:
             )
         )
 
+        if not (assembled_latex or "").strip() or not any((body or "").strip() for body in section_bodies.values()):
+            # Nothing was written: reject honestly instead of "accepting" an empty proof.
+            final_report = VerificationReport(
+                verdict="rejected",
+                defects=[Defect(severity="fatal", description="No proof text was produced, so there is nothing to verify.", claim="Empty proof")],
+                summary="Global verification rejected: no proof text was produced.",
+                exact_quotes_checked=0,
+                exact_quotes_passed=0,
+            )
+            verif_node.output = final_report.model_dump()
+            verif_node.status = "rejected"
+            self.save_node(run_id, verif_node)
+            await self.emit_event(
+                Event(
+                    run_id=run_id,
+                    seq=0,
+                    timestamp=time.strftime("%H:%M:%S"),
+                    event_type="node_updated",
+                    payload={"node": verif_node.model_dump()},
+                )
+            )
+            await self.emit_event(
+                Event(
+                    run_id=run_id,
+                    seq=0,
+                    timestamp=time.strftime("%H:%M:%S"),
+                    event_type="log_line",
+                    payload={
+                        "stage": "verification",
+                        "severity": "error",
+                        "text": "Global Verification REJECTED: no proof text was produced.",
+                        "node_id": verif_node.id,
+                    },
+                )
+            )
+            return verif_node, final_report
+
         async def run_single_reviewer(reviewer_idx: int) -> Tuple[Dict[str, Any], int, int, int, float]:
             prompt = (
                 f"Problem to Prove: {problem}\n\n"

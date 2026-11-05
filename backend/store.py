@@ -521,6 +521,21 @@ class RunStore:
         finally:
             conn.close()
 
+    def delete_run(self, run_id: str) -> bool:
+        """Delete a run and all of its trace data. Returns True if a run existed."""
+        conn = sqlite3.connect(self.db_path)
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT run_id FROM runs WHERE run_id = ?", (run_id,))
+            if not cursor.fetchone():
+                return False
+            for table in ("nodes", "edges", "events", "knowledge", "hmed_records", "raw_provenance", "runs"):
+                cursor.execute(f"DELETE FROM {table} WHERE run_id = ?", (run_id,))
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+
     def export_trace_json(self, run_id: str) -> Dict[str, Any]:
         """Produce a complete replayable trace artifact as JSON."""
         conn = sqlite3.connect(self.db_path)

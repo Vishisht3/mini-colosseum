@@ -9,8 +9,9 @@ Primary Provider (Required):
 Fallback Provider (Optional):
 - Baseten (https://inference.baseten.co/v1)
 - Muse Spark Open (meta-models/muse-spark-open-1026)
-- Used ONLY as fallback for eligible Meta Spark requests when configured and enabled.
-- Wonder never falls back to Baseten.
+- Tried first for eligible Meta Spark requests when configured and enabled; any failure falls back to Meta.
+- If a Baseten or Fireworks key fails for any reason, calls fall back to the Meta API key.
+- Wonder never falls back to Baseten or Fireworks.
 """
 
 import os
@@ -26,14 +27,21 @@ BASETEN_API_BASE_URL = os.environ.get("BASETEN_API_BASE_URL", "https://inference
 BASETEN_API_KEY = os.environ.get("BASETEN_API_KEY", "")
 BASETEN_MODEL_ID = "meta-models/muse-spark-open-1026"
 
+# Fireworks Provider Base URL (OpenAI-compatible, optional fallback)
+FIREWORKS_API_BASE_URL = os.environ.get("FIREWORKS_API_BASE_URL", "https://api.fireworks.ai/inference/v1")
+FIREWORKS_API_KEY = os.environ.get("FIREWORKS_API_KEY", "")
+FIREWORKS_MODEL_ID = os.environ.get("FIREWORKS_MODEL_ID", "accounts/fireworks/models/llama-v3p3-70b-instruct")
+
 # User-Configured Spending Caps & Budgets (USD)
 DEFAULT_RUN_BUDGET_CAP = 7.00
 DEFAULT_META_BUDGET_CAP = 150.00
 DEFAULT_BASETEN_BUDGET_CAP = 100.00
+DEFAULT_FIREWORKS_BUDGET_CAP = 100.00
 
 # Retained aliases for backward compatibility with existing telemetry consumers
 META_CREDIT_POOL = DEFAULT_META_BUDGET_CAP
 BASETEN_CREDIT_POOL = DEFAULT_BASETEN_BUDGET_CAP
+FIREWORKS_CREDIT_POOL = DEFAULT_FIREWORKS_BUDGET_CAP
 
 # Pricing table per 1,000,000 tokens (USD)
 PRICING_TABLE: Dict[str, Dict[str, Any]] = {
@@ -55,6 +63,12 @@ PRICING_TABLE: Dict[str, Dict[str, Any]] = {
         "output": 1.50,
         "provider": "baseten",
     },
+    "accounts/fireworks/models/llama-v3p3-70b-instruct": {
+        "input": 0.90,
+        "cached_input": 0.90,
+        "output": 0.90,
+        "provider": "fireworks",
+    },
     "muse-spark-1.3-contributor": {
         "input": 0.10,
         "cached_input": 0.002,
@@ -67,6 +81,10 @@ def get_model_pricing(model: str, provider: Optional[str] = None) -> Dict[str, A
     """Retrieve pricing info by model and optional provider context."""
     if model in PRICING_TABLE:
         return PRICING_TABLE[model]
+    if provider == "fireworks":
+        return PRICING_TABLE.get(FIREWORKS_MODEL_ID, {
+            "input": 0.90, "cached_input": 0.90, "output": 0.90, "provider": "fireworks"
+        })
     if provider == "baseten":
         return PRICING_TABLE.get(BASETEN_MODEL_ID, {
             "input": 0.50, "cached_input": 0.05, "output": 1.50, "provider": "baseten"
@@ -81,6 +99,7 @@ RATE_LIMITS: Dict[str, int] = {
     "meta-models/muse-spark-open-1026": 3000,
     "muse-spark-1.3": 3000,
     "muse-spark-1.3-contributor": 150,
+    "accounts/fireworks/models/llama-v3p3-70b-instruct": 3000,
 }
 
 @dataclass(frozen=True)
@@ -97,19 +116,19 @@ class RoleRoute:
 MODEL_ROUTES: Dict[str, RoleRoute] = {
     "explorer": RoleRoute(
         primary=RouteTarget(provider="meta", model="muse-spark-1.3"),
-        fallback=RouteTarget(provider="baseten", model=BASETEN_MODEL_ID),
+        fallback=None,
     ),
     "aggregator": RoleRoute(
         primary=RouteTarget(provider="meta", model="muse-spark-1.3"),
-        fallback=RouteTarget(provider="baseten", model=BASETEN_MODEL_ID),
+        fallback=None,
     ),
     "solver": RoleRoute(
         primary=RouteTarget(provider="meta", model="muse-spark-1.3"),
-        fallback=RouteTarget(provider="baseten", model=BASETEN_MODEL_ID),
+        fallback=None,
     ),
     "curator": RoleRoute(
         primary=RouteTarget(provider="meta", model="muse-spark-1.3"),
-        fallback=RouteTarget(provider="baseten", model=BASETEN_MODEL_ID),
+        fallback=None,
     ),
     "falsifier": RoleRoute(
         primary=RouteTarget(provider="meta", model="muse-wonder-1.0"),
@@ -144,13 +163,15 @@ FIXED_ROLLOUT_COUNT = 4
 
 # Provider request output caps by role (hard guardrail for per-call spend).
 ROLE_OUTPUT_TOKEN_CAPS: Dict[str, int] = {
-    "explorer": 1800,
-    "aggregator": 1800,
+    "explorer": 2500,
+    "aggregator": 3000,
     "solver": 2200,
     "curator": 1200,
-    "falsifier": 1400,
-    "gate": 1100,
-    "decomposer": 1800,
-    "section_falsifier": 1400,
-    "global_verifier": 1800,
+    "falsifier": 4000,
+    "gate": 3000,
+    "decomposer": 6000,
+    "section_falsifier": 4000,
+    "global_verifier": 6000,
 }
+
+

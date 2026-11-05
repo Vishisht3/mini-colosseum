@@ -119,10 +119,6 @@ body {
   white-space: nowrap;
 }
 
-.legacy-toolbar {
-  display: none;
-}
-
 .window-state b {
   color: #74d48a;
   font-weight: normal;
@@ -1265,4 +1261,84 @@ svg text {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Right pane: keep long text inside the box */
+.right-pane {
+  min-width: 0;
+}
+
+.right-pane .sunken-frame,
+.right-pane #inspector-container,
+.right-pane #coq-goals-container {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.coq-goals-pane {
+  overflow-x: hidden;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.coq-hypotheses {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.coq-goal-target,
+#insp-meta-text,
+#insp-analysis-content,
+#insp-falsifier-content,
+#insp-verifier-content,
+#insp-hmed-content,
+#insp-knowledge-content {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  max-width: 100%;
+}
+
+#coq-goals-container pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  max-width: 100%;
+}
+
+.subgoal-tab {
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.preview-proof {
+  margin-top: 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+
+/* Inspector tabs: two rows of three so labels never split mid-word */
+.subgoal-tabs-bar {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.subgoal-tab {
+  overflow: visible;
+  overflow-wrap: normal;
+  word-break: normal;
+  white-space: normal;
+  align-items: center;
+  min-height: 30px;
+  line-height: 1.2;
+}
+
+/* Status bar: wrap instead of clipping when the window is narrow */
+.status-bar {
+  flex-wrap: wrap;
+  height: auto;
+  min-height: 22px;
+}
+
+.status-segment {
+  min-width: 0;
 }

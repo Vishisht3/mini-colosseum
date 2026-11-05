@@ -159,15 +159,40 @@ class ExplorationEngine:
                 f"boundary cases, and potential theorem misuse. Assign a verdict: survives, needs_repair, reject, or falsified."
             )
 
-            f_out, f_in, f_cached, f_out_tok, f_cost = await self.client.call(
-                role="falsifier",
-                prompt=falsifier_prompt,
-                model=model_falsifier,
-                schema=FalsifierReport,
-                stable_prefix=knowledge_prefix,
-                reasoning_effort="medium",
-                context_hints={"problem": problem, "node_id": node_id, "round": round_num},
-            )
+            # One unreadable checker reply must not kill the whole run:
+            # treat the candidate as needing repair and carry on.
+            f_out, f_in, f_cached, f_out_tok, f_cost = {}, 0, 0, 0, 0.0
+            try:
+                f_out, f_in, f_cached, f_out_tok, f_cost = await self.client.call(
+                    role="falsifier",
+                    prompt=falsifier_prompt,
+                    model=model_falsifier,
+                    schema=FalsifierReport,
+                    stable_prefix=knowledge_prefix,
+                    reasoning_effort="medium",
+                    context_hints={"problem": problem, "node_id": node_id, "round": round_num},
+                )
+            except Exception as falsifier_exc:
+                f_out = {
+                    "verdict": "needs_repair",
+                    "assessment": f"Checker reply could not be read ({falsifier_exc}). Candidate kept for repair.",
+                    "objections": [],
+                    "categorized_objections": [],
+                }
+                await self.emit_event(
+                    Event(
+                        run_id=run_id,
+                        seq=0,
+                        timestamp=time.strftime("%H:%M:%S"),
+                        event_type="log_line",
+                        payload={
+                            "stage": "exploration",
+                            "severity": "warning",
+                            "text": f"Falsifier reply for candidate {node.label} could not be read; candidate marked as needing repair.",
+                            "node_id": node.id,
+                        },
+                    )
+                )
 
             node.tokens_in += f_in
             node.tokens_cached += f_cached

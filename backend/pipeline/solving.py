@@ -178,7 +178,10 @@ class SectionSolvingEngine:
                 f"Problem: {problem}\n\n"
                 f"Section to prove: Section {sp.index}: {sp.title}\n"
                 f"Target Claim: {sp.target_claim}\n\n"
-                f"Established Upstream Lemmas:\n{dep_context}\n"
+                f"Established Upstream Lemmas:\n{dep_context}\n\n"
+                "Return JSON with: status ('solved', 'partial', 'blocked'), "
+                "solution_body (the full LaTeX proof of this section, with $...$ math), "
+                "claimed_result, bridge_claims[], open_obligations[]."
             )
             if prior_critique:
                 solve_prompt += f"\n\nPrior Attempt Critique (MUST BE REPAIRED):\n{prior_critique}"
@@ -217,7 +220,7 @@ class SectionSolvingEngine:
 
             # --- STEP 2: Attack EACH writer's draft with a Wonder Falsifier (Section 6.1 / Appendix B) ---
             async def falsify_draft(draft_idx: int, draft: Dict[str, Any]) -> Tuple[Dict[str, Any], int, int, int, float]:
-                body = draft.get("solution_body", "")
+                body = draft.get("solution_body") or draft.get("latex_body") or draft.get("body", "")
                 f_prompt = (
                     f"Section {sp.index} Claim: {sp.target_claim}\n\n"
                     f"Candidate Proof Body (Writer {draft_idx + 1}):\n{body}\n\n"
@@ -261,7 +264,7 @@ class SectionSolvingEngine:
             )
             for i, draft in enumerate(raw_drafts):
                 critique_summary = draft.get("falsifier_critique", {}).get("assessment", "Audited.")
-                agg_prompt += f"--- Candidate {i+1} ---\n{draft.get('solution_body', '')}\nCritique: {critique_summary}\n\n"
+                agg_prompt += f"--- Candidate {i+1} ---\n{draft.get('solution_body') or draft.get('latex_body') or ''}\nCritique: {critique_summary}\n\n"
 
             agg_res = await self.client.call(
                 role="solver",
@@ -285,7 +288,7 @@ class SectionSolvingEngine:
             # Aggregated candidate is primary
             aggregated_solution = agg_out
             if not aggregated_solution.get("solution_body"):
-                aggregated_solution["solution_body"] = raw_drafts[0].get("solution_body", "")
+                aggregated_solution["solution_body"] = raw_drafts[0].get("solution_body") or raw_drafts[0].get("latex_body", "")
 
             node.output = aggregated_solution
             node.analysis = aggregated_solution.get("analysis") or raw_drafts[0].get("analysis")

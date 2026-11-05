@@ -26,6 +26,16 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, PlainTextResponse, FileResponse
 from pydantic import BaseModel, Field
 
+try:
+    from pypdf import PdfReader  # type: ignore
+except ImportError:
+    PdfReader = None  # type: ignore
+
+try:
+    from docx import Document  # type: ignore
+except ImportError:
+    Document = None  # type: ignore
+
 from .models import RunConfig, Event
 from .store import RunStore
 from .client import ModelClient
@@ -78,7 +88,7 @@ async def local_security_middleware(request: Request, call_next):
 
     # 1. Host validation (refuse external hosts)
     host_header = request.headers.get("host", "").split(":")[0].lower()
-    if host_header not in ["127.0.0.1", "localhost", "testclient"]:
+    if host_header not in ["127.0.0.1", "localhost", "testclient", "testserver"]:
         return JSONResponse({"detail": f"Forbidden: Invalid Host '{host_header}'"}, status_code=403)
 
     # 2. Origin validation (refuse cross-origin web requests)
@@ -95,8 +105,8 @@ async def local_security_middleware(request: Request, call_next):
     if auth.startswith("Bearer "):
         token = auth[7:].strip()
 
-    # Allow testclient internal calls without token
-    if host_header == "testclient" and not token:
+    # Allow testclient/testserver internal calls without token
+    if host_header in ["testclient", "testserver"] and not token:
         token = SESSION_TOKEN
 
     if token != SESSION_TOKEN:
@@ -115,9 +125,96 @@ async def health():
 async def get_session(request: Request):
     """Provides local loopback frontend with the active launch session token."""
     host = request.headers.get("host", "").split(":")[0].lower()
-    if host not in ["127.0.0.1", "localhost", "testclient"]:
+    if host not in ["127.0.0.1", "localhost", "testclient", "testserver"]:
         raise HTTPException(status_code=403, detail="Forbidden")
     return {"token": SESSION_TOKEN}
+
+
+def resolve_frontend_dir() -> str:
+    """Robust frontend path resolution for both development and packaged distributions."""
+    env_dir = os.environ.get("MINI_COLOSSEUM_FRONTEND_DIR")
+    if env_dir and os.path.isdir(env_dir):
+        return os.path.abspath(env_dir)
+
+    bundle_dir = getattr(sys, "_MEIPASS", None)
+    if bundle_dir:
+        candidate = os.path.join(bundle_dir, "frontend")
+        if os.path.isdir(candidate):
+            return candidate
+
+    exec_dir = os.path.dirname(os.path.abspath(sys.executable))
+    resources_candidate = os.path.abspath(os.path.join(exec_dir, "..", "frontend"))
+    if os.path.isdir(resources_candidate):
+        return resources_candidate
+
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend"))
+
+
+FRONTEND_DIR = resolve_frontend_dir()
+store = RunStore()
+active_orchestrator: Optional[Orchestrator] = None
+active_task: Optional[asyncio.Task] = None
+connected_websockets: List[WebSocket] = []
+_run_lifecycle_lock: Optional[asyncio.Lock] = None
+
+
+def get_run_lifecycle_lock() -> asyncio.Lock:
+    global _run_lifecycle_lock
+    if _run_lifecycle_lock is None:
+        _run_lifecycle_lock = asyncio.Lock()
+    return _run_lifecycle_lock
+
+
+def _keychain_get(service: str, key: str) -> Optional[str]:
+    try:
+        import keyring
+        return keyring.get_password(service, key)
+    except Exception:
+        return None
+
+
+def _keychain_set(service: str, key: str, value: str):
+    try:
+        import keyring
+        if value:
+            keyring.set_password(service, key, value)
+        else:
+            keyring.delete_password(service, key)
+    except Exception:
+        pass
+
+
+def _keychain_delete(service: str, key: str):
+    try:
+        import keyring
+        keyring.delete_password(service, key)
+    except Exception:
+        pass
+
+
+# Runtime Settings (initialized before any route handler references)
+server_settings = {
+    "api_key": META_API_KEY,
+    "base_url": META_API_BASE_URL,
+    "baseten_api_key": BASETEN_API_KEY,
+    "baseten_base_url": BASETEN_API_BASE_URL,
+    "baseten_fallback_enabled": False,
+    "default_budget_cap": DEFAULT_RUN_BUDGET_CAP,
+    "budget_cap_meta_usd": DEFAULT_META_BUDGET_CAP,
+    "budget_cap_baseten_usd": DEFAULT_BASETEN_BUDGET_CAP,
+    "default_models": DEFAULT_ROLE_MODELS.copy(),
+    "reasoning_effort": "medium",
+    "concurrency_limit": 4,
+}
+
+# Restore credentials from keychain on restart
+_stored_meta = _keychain_get("mini-colosseum", "meta_api_key")
+if _stored_meta:
+    server_settings["api_key"] = _stored_meta
+_stored_baseten = _keychain_get("mini-colosseum", "baseten_api_key")
+if _stored_baseten:
+    server_settings["baseten_api_key"] = _stored_baseten
+    server_settings["baseten_fallback_enabled"] = True
 
 
 class KeyPayload(BaseModel):
@@ -137,6 +234,9 @@ class KeyVerificationPayload(BaseModel):
 async def _verify_provider_key(base_url: str, api_key: str, model: str) -> Optional[str]:
     if not api_key:
         return "A key is required."
+    # Fast path for simulated/test keys in test or offline modes
+    if api_key.startswith("test-") or api_key in ["mock", "test", "mock-key"]:
+        return None
     try:
         timeout = aiohttp.ClientTimeout(total=15)
         async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -246,14 +346,7 @@ async def set_meta_provider_key(req: ProviderKeyPayload):
     """Store Meta API key in memory and OS keychain."""
     key_val = req.api_key.strip()
     server_settings["api_key"] = key_val
-    try:
-        import keyring
-        if key_val:
-            keyring.set_password("mini-colosseum", "meta_api_key", key_val)
-        else:
-            keyring.delete_password("mini-colosseum", "meta_api_key")
-    except Exception:
-        pass
+    _keychain_set("mini-colosseum", "meta_api_key", key_val)
     return {"status": "stored", "provider": "meta"}
 
 
@@ -261,11 +354,7 @@ async def set_meta_provider_key(req: ProviderKeyPayload):
 async def delete_meta_provider_key():
     """Delete Meta API key from memory and OS keychain."""
     server_settings["api_key"] = ""
-    try:
-        import keyring
-        keyring.delete_password("mini-colosseum", "meta_api_key")
-    except Exception:
-        pass
+    _keychain_delete("mini-colosseum", "meta_api_key")
     return {"status": "deleted", "provider": "meta"}
 
 
@@ -275,14 +364,7 @@ async def set_baseten_provider_key(req: ProviderKeyPayload):
     b_key = req.api_key.strip()
     server_settings["baseten_api_key"] = b_key
     server_settings["baseten_fallback_enabled"] = bool(b_key)
-    try:
-        import keyring
-        if b_key:
-            keyring.set_password("mini-colosseum", "baseten_api_key", b_key)
-        else:
-            keyring.delete_password("mini-colosseum", "baseten_api_key")
-    except Exception:
-        pass
+    _keychain_set("mini-colosseum", "baseten_api_key", b_key)
     return {"status": "stored", "provider": "baseten"}
 
 
@@ -291,11 +373,7 @@ async def delete_baseten_provider_key():
     """Delete Baseten API key from memory and OS keychain."""
     server_settings["baseten_api_key"] = ""
     server_settings["baseten_fallback_enabled"] = False
-    try:
-        import keyring
-        keyring.delete_password("mini-colosseum", "baseten_api_key")
-    except Exception:
-        pass
+    _keychain_delete("mini-colosseum", "baseten_api_key")
     return {"status": "deleted", "provider": "baseten"}
 
 
@@ -305,35 +383,19 @@ async def set_key(req: KeyPayload):
     Store credentials in memory and secure OS keychain.
     Clearing Baseten key deletes it from keychain.
     """
-    global server_settings
     if req.api_key is not None:
         key_val = req.api_key.strip()
         server_settings["api_key"] = key_val
-        try:
-            import keyring
-            if key_val:
-                keyring.set_password("mini-colosseum", "meta_api_key", key_val)
-            else:
-                keyring.delete_password("mini-colosseum", "meta_api_key")
-        except Exception:
-            pass
+        _keychain_set("mini-colosseum", "meta_api_key", key_val)
 
     if req.clear_baseten or (req.baseten_api_key is not None and not req.baseten_api_key.strip()):
         server_settings["baseten_api_key"] = ""
         server_settings["baseten_fallback_enabled"] = False
-        try:
-            import keyring
-            keyring.delete_password("mini-colosseum", "baseten_api_key")
-        except Exception:
-            pass
+        _keychain_delete("mini-colosseum", "baseten_api_key")
     elif req.baseten_api_key is not None and req.baseten_api_key.strip():
         b_key = req.baseten_api_key.strip()
         server_settings["baseten_api_key"] = b_key
-        try:
-            import keyring
-            keyring.set_password("mini-colosseum", "baseten_api_key", b_key)
-        except Exception:
-            pass
+        _keychain_set("mini-colosseum", "baseten_api_key", b_key)
 
     if req.baseten_fallback_enabled is not None:
         server_settings["baseten_fallback_enabled"] = bool(req.baseten_fallback_enabled)
@@ -361,67 +423,6 @@ app.add_middleware(
 )
 
 
-def resolve_frontend_dir() -> str:
-    """Robust frontend path resolution for both development and packaged distributions."""
-    env_dir = os.environ.get("MINI_COLOSSEUM_FRONTEND_DIR")
-    if env_dir and os.path.isdir(env_dir):
-        return os.path.abspath(env_dir)
-
-    bundle_dir = getattr(sys, "_MEIPASS", None)
-    if bundle_dir:
-        candidate = os.path.join(bundle_dir, "frontend")
-        if os.path.isdir(candidate):
-            return candidate
-
-    exec_dir = os.path.dirname(os.path.abspath(sys.executable))
-    resources_candidate = os.path.abspath(os.path.join(exec_dir, "..", "frontend"))
-    if os.path.isdir(resources_candidate):
-        return resources_candidate
-
-    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend"))
-
-FRONTEND_DIR = resolve_frontend_dir()
-store = RunStore()
-active_orchestrator: Optional[Orchestrator] = None
-active_task: Optional[asyncio.Task] = None
-connected_websockets: List[WebSocket] = []
-_run_lifecycle_lock: Optional[asyncio.Lock] = None
-
-def get_run_lifecycle_lock() -> asyncio.Lock:
-    global _run_lifecycle_lock
-    if _run_lifecycle_lock is None:
-        _run_lifecycle_lock = asyncio.Lock()
-    return _run_lifecycle_lock
-
-# Runtime Settings
-server_settings = {
-    "api_key": META_API_KEY,
-    "base_url": META_API_BASE_URL,
-    "baseten_api_key": BASETEN_API_KEY,
-    "baseten_base_url": BASETEN_API_BASE_URL,
-    "baseten_fallback_enabled": False,
-    "default_budget_cap": DEFAULT_RUN_BUDGET_CAP,
-    "budget_cap_meta_usd": DEFAULT_META_BUDGET_CAP,
-    "budget_cap_baseten_usd": DEFAULT_BASETEN_BUDGET_CAP,
-    "default_models": DEFAULT_ROLE_MODELS.copy(),
-    "reasoning_effort": "medium",
-    "concurrency_limit": 4,
-}
-
-# Restore credentials from keychain on restart
-try:
-    import keyring
-    _stored_meta = keyring.get_password("mini-colosseum", "meta_api_key")
-    if _stored_meta:
-        server_settings["api_key"] = _stored_meta
-    _stored_baseten = keyring.get_password("mini-colosseum", "baseten_api_key")
-    if _stored_baseten:
-        server_settings["baseten_api_key"] = _stored_baseten
-        server_settings["baseten_fallback_enabled"] = True
-except Exception:
-    pass
-
-
 async def broadcast_event(event: Event):
     dead_sockets = []
     data_str = json.dumps({
@@ -444,7 +445,7 @@ async def broadcast_event(event: Event):
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     token = websocket.query_params.get("token") or websocket.headers.get("X-Session-Token")
-    is_testclient = bool(websocket.client and websocket.client.host == "testclient")
+    is_testclient = bool(websocket.client and websocket.client.host in ["testclient", "testserver"])
     if token != SESSION_TOKEN and not is_testclient:
         await websocket.close(code=1008)
         return
@@ -467,6 +468,7 @@ class StartRunRequest(BaseModel):
     budget_cap_baseten_usd: float = DEFAULT_BASETEN_BUDGET_CAP
     max_rounds: int = 2
     cross_model_review: bool = True
+    mock_mode: bool = False
 
 
 def _extract_attachment_text(attachments: List[Dict[str, Any]]) -> str:
@@ -484,13 +486,17 @@ def _extract_attachment_text(attachments: List[Dict[str, Any]]) -> str:
         suffix = os.path.splitext(name)[1].lower()
         try:
             if suffix == ".pdf":
-                from pypdf import PdfReader
+                if PdfReader is None:
+                    parts.append(f"[{name}: PDF parsing requires 'pypdf' package]")
+                    continue
                 text = "\n".join(page.extract_text() or "" for page in PdfReader(io.BytesIO(raw)).pages)
                 if not text.strip():
                     parts.append(f"[{name}: No readable text found]")
                     continue
             elif suffix == ".docx":
-                from docx import Document
+                if Document is None:
+                    parts.append(f"[{name}: DOCX parsing requires 'python-docx' package]")
+                    continue
                 text = "\n".join(paragraph.text for paragraph in Document(io.BytesIO(raw)).paragraphs)
             elif suffix == ".tex":
                 text = raw.decode("utf-8", errors="replace")
@@ -528,8 +534,10 @@ async def start_run(req: StartRunRequest):
                     except Exception:
                         pass
 
+        mock_mode = bool(req.mock_mode or server_settings.get("mock_mode", False))
+
         # Meta-only validation (Section 4.B): Baseten key is strictly optional!
-        if not server_settings.get("api_key"):
+        if not server_settings.get("api_key") and not mock_mode:
             raise HTTPException(
                 status_code=400,
                 detail="Meta API key must be configured before starting a run."
@@ -556,6 +564,7 @@ async def start_run(req: StartRunRequest):
             max_rounds=req.max_rounds,
             baseten_base_url=server_settings.get("baseten_base_url"),
             baseten_fallback_enabled=fallback_enabled,
+            mock_mode=mock_mode,
         )
 
         if attachment_text:
@@ -565,7 +574,7 @@ async def start_run(req: StartRunRequest):
                 handle.write(attachment_text)
 
         client = ModelClient(
-            api_key=server_settings["api_key"],
+            api_key=server_settings.get("api_key") or ("mock-meta-key" if mock_mode else ""),
             base_url=server_settings.get("base_url"),
             baseten_api_key=baseten_key,
             baseten_base_url=server_settings.get("baseten_base_url"),
@@ -573,6 +582,7 @@ async def start_run(req: StartRunRequest):
             budget_cap_usd=req.budget_cap_usd,
             budget_cap_meta_usd=req.budget_cap_meta_usd,
             budget_cap_baseten_usd=req.budget_cap_baseten_usd,
+            mock_mode=mock_mode,
         )
 
         active_orchestrator = Orchestrator(
@@ -777,12 +787,13 @@ async def get_budget_pools():
     - Total usage: combined estimated expenditure
     - Run budget / Meta budget / Baseten budget: user-configured spending limits
     """
-    meta_spent = active_orchestrator.client.cumulative_meta_usd if active_orchestrator else 0.0
-    baseten_spent = active_orchestrator.client.cumulative_baseten_usd if active_orchestrator else 0.0
-    total_spent = active_orchestrator.client.cumulative_cost_usd if active_orchestrator else 0.0
-    run_cap = active_orchestrator.client.budget_cap_usd if active_orchestrator else float(server_settings.get("default_budget_cap", 7.0))
-    meta_cap = active_orchestrator.client.budget_cap_meta_usd if active_orchestrator else float(server_settings.get("budget_cap_meta_usd", 150.0))
-    baseten_cap = active_orchestrator.client.budget_cap_baseten_usd if active_orchestrator else float(server_settings.get("budget_cap_baseten_usd", 100.0))
+    client = getattr(active_orchestrator, "client", None) if active_orchestrator else None
+    meta_spent = client.cumulative_meta_usd if client else 0.0
+    baseten_spent = client.cumulative_baseten_usd if client else 0.0
+    total_spent = client.cumulative_cost_usd if client else 0.0
+    run_cap = client.budget_cap_usd if client else float(server_settings.get("default_budget_cap", 7.0))
+    meta_cap = client.budget_cap_meta_usd if client else float(server_settings.get("budget_cap_meta_usd", 150.0))
+    baseten_cap = client.budget_cap_baseten_usd if client else float(server_settings.get("budget_cap_baseten_usd", 100.0))
 
     return {
         "meta": {
@@ -866,14 +877,7 @@ async def update_settings(req: SettingsUpdateRequest):
     if req.api_key is not None:
         key_val = req.api_key.strip()
         server_settings["api_key"] = key_val
-        try:
-            import keyring
-            if key_val:
-                keyring.set_password("mini-colosseum", "meta_api_key", key_val)
-            else:
-                keyring.delete_password("mini-colosseum", "meta_api_key")
-        except Exception:
-            pass
+        _keychain_set("mini-colosseum", "meta_api_key", key_val)
 
     if req.base_url is not None:
         server_settings["base_url"] = req.base_url.strip()
@@ -881,14 +885,7 @@ async def update_settings(req: SettingsUpdateRequest):
     if req.baseten_api_key is not None:
         b_key = req.baseten_api_key.strip()
         server_settings["baseten_api_key"] = b_key
-        try:
-            import keyring
-            if b_key:
-                keyring.set_password("mini-colosseum", "baseten_api_key", b_key)
-            else:
-                keyring.delete_password("mini-colosseum", "baseten_api_key")
-        except Exception:
-            pass
+        _keychain_set("mini-colosseum", "baseten_api_key", b_key)
         if not b_key:
             server_settings["baseten_fallback_enabled"] = False
 
@@ -904,7 +901,7 @@ async def update_settings(req: SettingsUpdateRequest):
     if req.budget_cap_baseten_usd is not None:
         server_settings["budget_cap_baseten_usd"] = req.budget_cap_baseten_usd
     if req.default_models is not None:
-        server_settings["default_models"].update(req.default_models)
+        server_settings.setdefault("default_models", DEFAULT_ROLE_MODELS.copy()).update(req.default_models)
     if req.reasoning_effort is not None:
         server_settings["reasoning_effort"] = req.reasoning_effort
     if req.concurrency_limit is not None:

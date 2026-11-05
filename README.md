@@ -49,104 +49,126 @@ The project has four main layers:
 - [backend](backend): API server, store, client, models, pipelines, and orchestration
 - [frontend](frontend): static HTML/CSS/JS for the web UI
 - [electron](electron): Electron shell for packaged desktop usage
-- [tests](tests): backend acceptance and routing tests
+- [tests](tests): backend acceptance, routing, and HTTP integration tests
+- [run.bat](run.bat): Windows one-click launcher
 - [run.sh](run.sh): POSIX launcher for macOS/Linux
-- [run.ps1](run.ps1): Windows launcher
 - [package.json](package.json): Node scripts and Electron packaging config
+- [requirements.txt](requirements.txt): Python backend dependencies
 
 ## Prerequisites
 
-- Python 3.10+
-- Node.js and npm
-- Access to a valid Meta API key
-- Optional Baseten API key for fallback routing and budget shielding
+- **Python 3.10+** (Python 3.10, 3.11, 3.12, 3.13, or 3.14)
+- **Meta API Key** (required: `META_API_KEY` or `MODEL_API_KEY` for Muse Spark 1.3 & Muse Wonder 1.0)
+- **Optional Baseten API Key** (for automatic fallback routing on Spark roles)
+- *Optional:* **Node.js & npm** (only needed if using the Electron desktop wrapper or editing frontend bundle)
 
-## Quick start
+---
 
-### 1) Install dependencies
+## How to Run the Software
+
+Mini-Colosseum can be run in **Browser Mode** (recommended, zero-Node required) or **Desktop Electron Mode**.
+
+### 1) Install Python Dependencies
+
+Before the first run, install the required Python packages:
 
 ```bash
-python -m pip install -r requirements.txt
-npm install
+# On Windows:
+py -m pip install -r requirements.txt
+
+# On macOS / Linux:
+python3 -m pip install -r requirements.txt
 ```
 
-### 2) Start the app in browser mode
+---
 
-This is the simplest local-development path and runs the backend directly without the Electron wrapper:
+### Option 1: Windows One-Click (Recommended for Windows)
 
-```bash
-python -m backend.main 8765
+Simply double-click or run from cmd/terminal:
+```cmd
+run.bat
+```
+This launcher:
+- Resolves your local Python executable (`py`, `python`, or local app paths)
+- Automatically clears any stale background processes on port `8765`
+- Bypasses PowerShell script execution restrictions safely
+- Starts the FastAPI orchestrator and opens the RocqIDE UI in your default browser at `http://127.0.0.1:8765`
+
+### Option 2: Windows PowerShell
+
+If running directly from a PowerShell console, execute with execution policy bypass:
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run.ps1
 ```
 
-Or use the npm shortcut:
+### Option 3: macOS / Linux (Bash / Zsh)
 
+Make the script executable and run:
 ```bash
-npm run start:browser
-```
-
-Then open:
-
-- http://127.0.0.1:8765
-
-### 3) Start the desktop Electron app
-
-```bash
-npm start
-```
-
-This launches the Electron shell, which starts the backend process and points the app at the local loopback server. This is the intended end-user desktop experience.
-
-## Platform launchers: why both run.sh and run.ps1?
-
-Both scripts are thin convenience launchers for the same application. They exist because the project supports two native operating environments with different shell conventions:
-
-- [run.sh](run.sh): for macOS and Linux users running Bash/Zsh
-- [run.ps1](run.ps1): for Windows PowerShell users
-
-They both do the same core job:
-
-- locate Python
-- start the backend with the local research harness
-- wait until the health endpoint responds
-- open the app in the default browser
-- keep the backend process alive until the user exits
-
-The difference is only in shell syntax and platform conventions. In other words, these are not competing implementations; they are equivalent startup entrypoints for the same runtime.
-
-### Example
-
-On macOS/Linux:
-
-```bash
+chmod +x run.sh
 ./run.sh
 ```
 
-On Windows PowerShell:
+### Option 3: Direct Python Terminal Command
 
-```powershell
-./run.ps1
+You can run the backend directly without any wrapper scripts:
+```bash
+# Windows
+py -m backend.main 8765
+
+# macOS / Linux
+python3 -m backend.main 8765
+```
+Then navigate to **http://127.0.0.1:8765** in any modern web browser.
+
+### Option 4: Desktop Electron App
+
+If you prefer running inside an isolated Electron desktop window:
+```bash
+# 1. Install Node dependencies (required for Electron)
+npm install
+
+# 2. Launch the desktop app
+npm start
 ```
 
-## Configuration and provider setup
+---
 
-The first launch requires valid provider keys. These are verified against the provider endpoints and can be stored via the OS keychain when available.
+## Platform Launchers Summary
 
-Key behavior is intentionally local and loopback-scoped:
+| Launcher | OS | How to Run | Notes |
+| :--- | :--- | :--- | :--- |
+| **`run.bat`** | Windows | Double-click or `run.bat` | Simplest Windows path; avoids PowerShell execution policy roadblocks |
+| **`run.ps1`** | Windows | `powershell -ExecutionPolicy Bypass -File .\run.ps1` | Native PowerShell runner with automatic port release |
+| **`run.sh`** | macOS / Linux | `./run.sh` | POSIX shell script with automatic readiness check |
+| **Direct CLI** | All | `python -m backend.main 8765` | Direct Python command for browser mode (no wrappers) |
+| **`npm start`** | All | `npm start` | Launches Electron desktop window (requires `npm install` first) |
 
-- Meta is the primary provider path
-- Baseten may be enabled as an optional fallback route
-- Sensitive credentials are not exposed in run configs or exported traces
-- The app validates host, origin, and session token headers before accepting API traffic
+---
 
-## Running tests
+## Configuration and Provider Setup
+
+When you first launch Mini-Colosseum, the onboarding modal will prompt you for your API credentials:
+
+1. **Meta API Key**: Required. Mini-Colosseum validates access to `muse-spark-1.3` (exploration and drafting) and `muse-wonder-1.0` (falsification, gate, and verification).
+2. **Baseten API Key**: Optional. When configured, any rate limits (`429`), timeouts, or transient server failures on Spark roles automatically fail over to Baseten's `meta-models/muse-spark-open-1026`. Wonder roles always stay on Meta. If a Baseten key is missing or revoked, calls automatically fall back to Meta API.
+3. **Keychain Security**: Valid keys are saved into your local operating system keychain or environment variables. Raw keys are never stored in SQLite run traces, logs, or exports.
+
+---
+
+## Running Tests
+
+To verify the test suite:
 
 ```bash
-python -m unittest discover -s tests -p "test_*.py"
+# Run all backend unit, routing, and HTTP integration tests (61 tests)
+python -m pytest
+
+# Run frontend state reducer unit tests
+node frontend/js/reducer.test.js
 ```
 
-```bash
-npm run test:frontend
-```
+---
 
 ## Problem input and output
 
@@ -181,5 +203,3 @@ Mini-Colosseum is a local, desktop-first research harness that combines:
 - a multi-stage solver pipeline for exploration, decomposition, verification, and curation
 - provider-aware model routing with Meta primary and optional Baseten fallback
 - a browser and Electron UI for interactive use and report export
-
-The shell scripts are simply the easiest way to start the same system on macOS/Linux or Windows without needing to remember the exact backend command sequence.

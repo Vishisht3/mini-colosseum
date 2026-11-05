@@ -21,11 +21,31 @@ let backendUrl = `http://127.0.0.1:${backendPort}`;
 const sessionToken = crypto.randomBytes(24).toString("hex");
 process.env.MINI_COLOSSEUM_SESSION_TOKEN = sessionToken;
 
+function resolvePythonCommand(rootDir) {
+  if (app.isPackaged) {
+    return path.join(rootDir, "backend", process.platform === "win32" ? "colosseum-backend.exe" : "colosseum-backend");
+  }
+  if (process.platform === "win32") {
+    const candidates = [
+      "python",
+      "py",
+      path.join(process.env.LOCALAPPDATA || "", "Python", "bin", "python.exe"),
+      path.join(process.env.LOCALAPPDATA || "", "Programs", "Python", "Python314", "python.exe"),
+    ];
+    for (const cand of candidates) {
+      try {
+        execSync(`"${cand}" --version`, { stdio: "ignore" });
+        return cand;
+      } catch (_) {}
+    }
+    return "python";
+  }
+  return "python3";
+}
+
 function startPythonBackend(onReadyCallback) {
   const rootDir = app.isPackaged ? process.resourcesPath : path.resolve(__dirname, "..");
-  const pythonCmd = app.isPackaged
-    ? path.join(rootDir, "backend", process.platform === "win32" ? "colosseum-backend.exe" : "colosseum-backend")
-    : (process.platform === "win32" ? "python" : "python3");
+  const pythonCmd = resolvePythonCommand(rootDir);
   const pythonArgs = app.isPackaged
     ? ["0", "--token", sessionToken]
     : ["-m", "backend.main", "0", "--token", sessionToken];

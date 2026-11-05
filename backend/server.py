@@ -178,10 +178,11 @@ async def verify_keys(req: KeyVerificationPayload):
     Verify API keys:
     1. Verify Meta (both Spark and Wonder).
     2. If Baseten key supplied, verify hackathon model.
-    3. If no Baseten key, skip Baseten verification.
+    3. If Baseten key fails verification, report a warning and fall back to Meta API rather than blocking setup.
     4. Missing Baseten key must never cause verification to fail.
     """
     errors = {}
+    warnings = {}
     meta_error = await verify_meta_key(req.api_key.strip())
     if meta_error:
         errors["meta"] = meta_error
@@ -190,18 +191,28 @@ async def verify_keys(req: KeyVerificationPayload):
     if req.baseten_api_key and req.baseten_api_key.strip():
         baseten_error = await verify_baseten_key(req.baseten_api_key.strip())
         if baseten_error:
-            errors["baseten"] = baseten_error
+            if not meta_error:
+                # Meta is valid! Warn about Baseten key and indicate fallback to Meta API
+                warnings["baseten"] = f"{baseten_error} Falling back to Meta API."
+            else:
+                errors["baseten"] = baseten_error
         else:
             baseten_verified = True
 
     if errors:
-        return JSONResponse({"errors": errors}, status_code=400)
+        return JSONResponse({"errors": errors, "warnings": warnings}, status_code=400)
 
     return {
         "status": "verified",
+        "warnings": warnings,
         "meta": {"verified": True, "models": ["muse-spark-1.3", "muse-wonder-1.0"]},
         "baseten": (
-            {"verified": baseten_verified, "model": BASETEN_MODEL_ID}
+            {
+                "verified": baseten_verified,
+                "model": BASETEN_MODEL_ID,
+                "fallback_to_meta": not baseten_verified,
+                "warning": warnings.get("baseten"),
+            }
             if req.baseten_api_key and req.baseten_api_key.strip()
             else {"verified": False, "skipped": True}
         ),

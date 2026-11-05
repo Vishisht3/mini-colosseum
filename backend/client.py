@@ -4,10 +4,11 @@ Handles:
 - Primary Provider: Meta Model API (muse-spark-1.3, muse-wonder-1.0)
 - Fallback Provider: Baseten (meta-models/muse-spark-open-1026) for eligible Spark roles
 - Strict fallback policy:
-  - 429 rate limit / quota exhaustion -> retry, then Baseten fallback
-  - 500-599 server errors -> retry, then Baseten fallback
-  - Network / timeout failures -> retry, then Baseten fallback
-  - 401 auth / 400 bad request / 404 model not found -> raise immediately without fallback
+  - 429 rate limit / quota exhaustion -> retry, then fallback
+  - 500-599 server errors -> retry, then fallback
+  - Network / timeout failures -> retry, then fallback
+  - 401 auth / 403 / invalid key on non-Meta primary (e.g. Baseten) -> immediate fallback to Meta API without retries
+  - 400 bad request / 404 model not found on non-Meta primary -> fallback to Meta API if available
   - Wonder 1.0 never falls back to Baseten
 - Accurate provider-specific accounting (Meta expenditure vs Baseten expenditure)
 - Atomic in-flight budget reservations
@@ -216,7 +217,28 @@ class ModelClient:
             )
 
         if not model_override:
-            return base_route
+            if (
+                base_route.fallback is not None
+                and base_route.fallback.provider == "baseten"
+                and self.baseten_fallback_enabled
+                and self.baseten_api_key
+            ):
+                return RoleRoute(
+                    primary=base_route.fallback,
+                    fallback=RouteTarget(provider="meta", model=base_route.primary.model)
+                    if self._provider_available("meta")
+                    else None,
+                )
+            return RoleRoute(
+                primary=base_route.primary,
+                fallback=base_route.fallback
+                if (
+                    self.baseten_fallback_enabled
+                    and base_route.fallback is not None
+                    and self._provider_available(base_route.fallback.provider)
+                )
+                else None,
+            )
 
         # Handle explicit model override while preserving Wonder constraint
         if "wonder" in model_override:
@@ -224,21 +246,28 @@ class ModelClient:
                 primary=RouteTarget(provider="meta", model=model_override),
                 fallback=None,
             )
-        if "spark-open" in model_override or model_override == BASETEN_MODEL_ID:
+        if "spark-open" in model_override or model_override == BASETEN_MODEL_ID or model_override.startswith("meta-models/"):
             return RoleRoute(
-                primary=RouteTarget(provider="baseten", model=BASETEN_MODEL_ID),
-                fallback=None,
+                primary=RouteTarget(provider="baseten", model=BASETEN_MODEL_ID if model_override == "spark-open" else model_override),
+                fallback=RouteTarget(provider="meta", model=base_route.primary.model if "spark" in base_route.primary.model else "muse-spark-1.3")
+                if self._provider_available("meta")
+                else None,
             )
         if "spark" in model_override:
             return RoleRoute(
                 primary=RouteTarget(provider="meta", model=model_override),
-                fallback=RouteTarget(provider="baseten", model=BASETEN_MODEL_ID),
+                fallback=RouteTarget(provider="baseten", model=BASETEN_MODEL_ID)
+                if (self.baseten_fallback_enabled and self._provider_available("baseten"))
+                else None,
             )
 
-        # Fallback generic
+        # Fallback generic: if primary is non-Meta, fallback to Meta API if available
+        primary_prov = self.get_provider(model_override)
         return RoleRoute(
-            primary=RouteTarget(provider=self.get_provider(model_override), model=model_override),
-            fallback=None,
+            primary=RouteTarget(provider=primary_prov, model=model_override),
+            fallback=RouteTarget(provider="meta", model=base_route.primary.model)
+            if (primary_prov != "meta" and self._provider_available("meta"))
+            else None,
         )
 
     def get_provider(self, model: str) -> str:
@@ -246,6 +275,28 @@ class ModelClient:
         if "spark-open" in model or model == BASETEN_MODEL_ID or model.startswith("meta-models/"):
             return "baseten"
         return "meta"
+
+    def _provider_available(self, provider: str) -> bool:
+        if self.mock_mode:
+            return True
+        return (self.meta_client if provider == "meta" else self.baseten_client) is not None
+
+    def _provider_budget(self, provider: str) -> tuple[float, float]:
+        if provider == "baseten":
+            return self.cumulative_baseten_usd, self.reserved_baseten_usd
+        return self.cumulative_meta_usd, self.reserved_meta_usd
+
+    def _reserve_provider_budget(self, provider: str, amount: float) -> None:
+        if provider == "baseten":
+            self.reserved_baseten_usd += amount
+        else:
+            self.reserved_meta_usd += amount
+
+    def _release_provider_budget(self, provider: str, amount: float) -> None:
+        if provider == "baseten":
+            self.reserved_baseten_usd = max(0.0, self.reserved_baseten_usd - amount)
+        else:
+            self.reserved_meta_usd = max(0.0, self.reserved_meta_usd - amount)
 
     def compute_cost(
         self,
@@ -340,42 +391,53 @@ class ModelClient:
                     reasoning_effort=reasoning_effort,
                     max_attempts=3,  # Initial attempt + 2 retries
                 )
-        except RetryableProviderError as exc:
-            # Check if fallback is eligible
-            logger.warning(f"Primary call ({route.primary.provider}/{route.primary.model}) encountered retryable failure: {exc}")
-            can_fallback = (
-                self.baseten_fallback_enabled
+        except (RetryableProviderError, NonRetryableProviderError, RuntimeError) as exc:
+            # Check if fallback is eligible:
+            # - Retryable errors can fall back to any configured fallback provider (Meta -> Baseten, or Baseten -> Meta)
+            # - Non-retryable / auth / key / client-missing errors on a non-Meta provider can fall back to Meta API
+            logger.warning(f"Primary call ({route.primary.provider}/{route.primary.model}) encountered failure: {exc}")
+            is_retryable = isinstance(exc, RetryableProviderError)
+            fallback_to_meta_on_key_failure = (
+                route.primary.provider != "meta"
                 and route.fallback is not None
-                and (self.baseten_client is not None or self.mock_mode)
+                and route.fallback.provider == "meta"
+            )
+            can_fallback = (
+                route.fallback is not None
+                and self._provider_available(route.fallback.provider)
+                and (
+                    (is_retryable and (self.baseten_fallback_enabled or route.fallback.provider == "meta"))
+                    or fallback_to_meta_on_key_failure
+                )
             )
 
             if not can_fallback:
                 logger.error(f"Fallback ineligible or disabled. Re-raising: {exc}")
                 raise
 
-            # Release primary reservation and check Baseten budget
+            # Release primary reservation and check fallback provider budget.
             fallback_est_cost = self.estimate_call_cost(route.fallback.model, full_prompt, role, provider=route.fallback.provider)
             async with self.lock:
-                # Release Meta reservation
                 self.reserved_cost_usd = max(0.0, self.reserved_cost_usd - primary_est_cost)
-                if route.primary.provider == "baseten":
-                    self.reserved_baseten_usd = max(0.0, self.reserved_baseten_usd - primary_est_cost)
-                else:
-                    self.reserved_meta_usd = max(0.0, self.reserved_meta_usd - primary_est_cost)
+                self._release_provider_budget(route.primary.provider, primary_est_cost)
 
-                # Check Baseten & total cap
                 if (self.cumulative_cost_usd + self.reserved_cost_usd + fallback_est_cost) > self.budget_cap_usd:
                     raise BudgetExceededError(
                         f"Fallback call cost (${fallback_est_cost:.4f}) would exceed run budget cap (${self.budget_cap_usd:.2f})"
                     )
-                if (self.cumulative_baseten_usd + self.reserved_baseten_usd + fallback_est_cost) > self.budget_cap_baseten_usd:
+                fallback_cumulative, fallback_reserved = self._provider_budget(route.fallback.provider)
+                fallback_cap = (
+                    self.budget_cap_baseten_usd
+                    if route.fallback.provider == "baseten"
+                    else self.budget_cap_meta_usd
+                )
+                if (fallback_cumulative + fallback_reserved + fallback_est_cost) > fallback_cap:
                     raise BudgetExceededError(
-                        f"Fallback call cost (${fallback_est_cost:.4f}) would exceed Baseten spending cap (${self.budget_cap_baseten_usd:.2f})"
+                        f"Fallback call cost (${fallback_est_cost:.4f}) would exceed {route.fallback.provider.title()} spending cap (${fallback_cap:.2f})"
                     )
 
-                # Reserve Baseten
                 self.reserved_cost_usd += fallback_est_cost
-                self.reserved_baseten_usd += fallback_est_cost
+                self._reserve_provider_budget(route.fallback.provider, fallback_est_cost)
 
             # Record / emit fallback event
             fallback_payload = {
@@ -416,7 +478,7 @@ class ModelClient:
             finally:
                 async with self.lock:
                     self.reserved_cost_usd = max(0.0, self.reserved_cost_usd - fallback_est_cost)
-                    self.reserved_baseten_usd = max(0.0, self.reserved_baseten_usd - fallback_est_cost)
+                    self._release_provider_budget(route.fallback.provider, fallback_est_cost)
         finally:
             async with self.lock:
                 self.reserved_cost_usd = max(0.0, self.reserved_cost_usd - primary_est_cost)
@@ -688,8 +750,17 @@ class ModelClient:
         if ctx.get("simulate_meta_error") and provider == "meta":
             raise RetryableProviderError("Simulated HTTP 500 Internal Server Error on Meta", status_code=500)
 
-        if ctx.get("simulate_auth_error") and provider == "meta":
-            raise NonRetryableProviderError("Simulated HTTP 401 Invalid Key on Meta", status_code=401)
+        if ctx.get("simulate_baseten_429") and provider == "baseten":
+            raise RetryableProviderError("Simulated HTTP 429 Rate Limit on Baseten", status_code=429)
+
+        if ctx.get("simulate_baseten_error") and provider == "baseten":
+            raise RetryableProviderError("Simulated HTTP 500 Internal Server Error on Baseten", status_code=500)
+
+        if ctx.get("simulate_baseten_auth_error") and provider == "baseten":
+            raise NonRetryableProviderError("Simulated HTTP 401 Invalid Key on Baseten", status_code=401)
+
+        if ctx.get("simulate_auth_error"):
+            raise NonRetryableProviderError(f"Simulated HTTP 401 Invalid Key on {provider.title()}", status_code=401)
 
         await asyncio.sleep(random.uniform(0.01, 0.04))
         problem = ctx.get("problem", "mathematical theorem")

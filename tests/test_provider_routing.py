@@ -80,13 +80,19 @@ class TestClientRouting(unittest.IsolatedAsyncioTestCase):
     """Verify ModelClient.get_route() returns correct routes with overrides."""
 
     def setUp(self):
-        self.client = ModelClient(mock_mode=True)
+        self.client = ModelClient(
+            mock_mode=True,
+            api_key="test-meta",
+            baseten_api_key="test-baseten",
+            baseten_fallback_enabled=True,
+        )
 
     def test_get_route_explorer_default(self):
         route = self.client.get_route("explorer")
-        self.assertEqual(route.primary.provider, "meta")
-        self.assertEqual(route.primary.model, "muse-spark-1.3")
+        self.assertEqual(route.primary.provider, "baseten")
+        self.assertEqual(route.primary.model, BASETEN_MODEL_ID)
         self.assertIsNotNone(route.fallback)
+        self.assertEqual(route.fallback.provider, "meta")
 
     def test_get_route_global_verifier_default(self):
         route = self.client.get_route("global_verifier")
@@ -106,11 +112,12 @@ class TestClientRouting(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(route.primary.model, BASETEN_MODEL_ID)
 
     def test_get_route_unknown_role_defaults_to_spark(self):
-        """Unknown roles default to Spark 1.3 with Baseten fallback."""
+        """Unknown roles default to Baseten Spark Open with Meta fallback."""
         route = self.client.get_route("unknown_role")
-        self.assertEqual(route.primary.provider, "meta")
-        self.assertEqual(route.primary.model, "muse-spark-1.3")
+        self.assertEqual(route.primary.provider, "baseten")
+        self.assertEqual(route.primary.model, BASETEN_MODEL_ID)
         self.assertIsNotNone(route.fallback)
+        self.assertEqual(route.fallback.provider, "meta")
 
 
 class TestMetaOnlyConfiguration(unittest.IsolatedAsyncioTestCase):
@@ -169,49 +176,43 @@ class TestMetaPlusBasteten(unittest.IsolatedAsyncioTestCase):
 
 
 class TestFallbackBehavior(unittest.IsolatedAsyncioTestCase):
-    """Fallback triggers and guards: 429, 500, quota, Wonder never falls back, 401/400 fatal."""
+    """Fallback triggers and guards for Baseten-primary Spark routes."""
 
-    async def test_429_rate_limit_triggers_baseten_fallback(self):
-        """Meta HTTP 429 triggers Baseten fallback for Spark roles."""
-        client = ModelClient(
+    def make_client(self, **kwargs):
+        return ModelClient(
             mock_mode=True,
-            baseten_fallback_enabled=True,
-            budget_cap_usd=50.0,
+            api_key="test-meta",
+            baseten_api_key="test-baseten",
+            **kwargs,
         )
-        # Simulate Meta 429 for a Spark role with fallback
+
+    async def test_429_rate_limit_triggers_meta_fallback(self):
+        """Baseten HTTP 429 triggers Meta fallback for Spark roles."""
+        client = self.make_client(baseten_fallback_enabled=True, budget_cap_usd=50.0)
         result = await client.generate(
             role="explorer",
             prompt="test prompt",
-            context_hints={"simulate_meta_429": True},
+            context_hints={"simulate_baseten_429": True},
         )
-        # If fallback worked, result should come from baseten
         self.assertTrue(result.fallback_used)
-        self.assertEqual(result.provider, "baseten")
+        self.assertEqual(result.provider, "meta")
         self.assertIn("429", result.fallback_reason)
 
-    async def test_500_error_triggers_baseten_fallback(self):
-        """Meta HTTP 500 triggers Baseten fallback for Spark roles."""
-        client = ModelClient(
-            mock_mode=True,
-            baseten_fallback_enabled=True,
-            budget_cap_usd=50.0,
-        )
+    async def test_500_error_triggers_meta_fallback(self):
+        """Baseten HTTP 500 triggers Meta fallback for Spark roles."""
+        client = self.make_client(baseten_fallback_enabled=True, budget_cap_usd=50.0)
         result = await client.generate(
             role="solver",
             prompt="test prompt",
-            context_hints={"simulate_meta_error": True},
+            context_hints={"simulate_baseten_error": True},
         )
         self.assertTrue(result.fallback_used)
-        self.assertEqual(result.provider, "baseten")
+        self.assertEqual(result.provider, "meta")
         self.assertIn("500", result.fallback_reason)
 
     async def test_wonder_never_falls_back_to_baseten(self):
         """Wonder roles (falsifier, gate, etc.) must NEVER fall back to Baseten."""
-        client = ModelClient(
-            mock_mode=True,
-            baseten_fallback_enabled=True,
-            budget_cap_usd=50.0,
-        )
+        client = self.make_client(baseten_fallback_enabled=True, budget_cap_usd=50.0)
         # Simulate Meta error for a Wonder role — should raise, NOT fallback
         with self.assertRaises(RetryableProviderError):
             await client.generate(
@@ -222,11 +223,7 @@ class TestFallbackBehavior(unittest.IsolatedAsyncioTestCase):
 
     async def test_wonder_gate_never_falls_back(self):
         """Gate role (Wonder) must raise on error, not fallback."""
-        client = ModelClient(
-            mock_mode=True,
-            baseten_fallback_enabled=True,
-            budget_cap_usd=50.0,
-        )
+        client = self.make_client(baseten_fallback_enabled=True, budget_cap_usd=50.0)
         with self.assertRaises(RetryableProviderError):
             await client.generate(
                 role="gate",
@@ -236,11 +233,7 @@ class TestFallbackBehavior(unittest.IsolatedAsyncioTestCase):
 
     async def test_wonder_falsifier_never_falls_back(self):
         """Falsifier role (Wonder) must raise on error, not fallback."""
-        client = ModelClient(
-            mock_mode=True,
-            baseten_fallback_enabled=True,
-            budget_cap_usd=50.0,
-        )
+        client = self.make_client(baseten_fallback_enabled=True, budget_cap_usd=50.0)
         with self.assertRaises(RetryableProviderError):
             await client.generate(
                 role="falsifier",
@@ -248,13 +241,35 @@ class TestFallbackBehavior(unittest.IsolatedAsyncioTestCase):
                 context_hints={"simulate_meta_error": True},
             )
 
-    async def test_401_auth_error_does_not_fallback(self):
-        """HTTP 401 auth error must raise immediately, never fallback."""
-        client = ModelClient(
-            mock_mode=True,
-            baseten_fallback_enabled=True,
-            budget_cap_usd=50.0,
+    async def test_401_auth_error_on_baseten_falls_back_to_meta(self):
+        """HTTP 401 auth error on Baseten immediately falls back to Meta API without failing the run."""
+        client = self.make_client(baseten_fallback_enabled=True, budget_cap_usd=50.0)
+        result = await client.generate(
+            role="explorer",
+            prompt="test prompt",
+            context_hints={"simulate_baseten_auth_error": True},
         )
+        self.assertTrue(result.fallback_used)
+        self.assertEqual(result.provider, "meta")
+        self.assertEqual(result.model, "muse-spark-1.3")
+        self.assertIn("401", result.fallback_reason)
+
+    async def test_401_auth_error_on_baseten_override_even_when_fallback_flag_disabled_falls_back_to_meta(self):
+        """Even if baseten_fallback_enabled=False, an explicit Baseten model override with invalid Baseten key falls back to Meta API."""
+        client = self.make_client(baseten_fallback_enabled=False, budget_cap_usd=50.0)
+        result = await client.generate(
+            role="explorer",
+            prompt="test prompt",
+            model_override=BASETEN_MODEL_ID,
+            context_hints={"simulate_baseten_auth_error": True},
+        )
+        self.assertTrue(result.fallback_used)
+        self.assertEqual(result.provider, "meta")
+        self.assertEqual(result.model, "muse-spark-1.3")
+
+    async def test_401_auth_error_on_meta_does_not_fallback(self):
+        """HTTP 401 auth error on Meta primary must raise immediately, never fallback."""
+        client = self.make_client(baseten_fallback_enabled=False, budget_cap_usd=50.0)
         with self.assertRaises(NonRetryableProviderError) as ctx:
             await client.generate(
                 role="explorer",
@@ -263,19 +278,17 @@ class TestFallbackBehavior(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(ctx.exception.status_code, 401)
 
-    async def test_fallback_disabled_raises_on_meta_failure(self):
-        """When Baseten fallback is disabled, Meta failure raises directly."""
-        client = ModelClient(
-            mock_mode=True,
-            baseten_fallback_enabled=False,
-            budget_cap_usd=50.0,
+    async def test_baseten_override_429_falls_back_to_meta(self):
+        """When Baseten is explicitly overridden, Baseten HTTP 429 falls back to Meta API even if baseten_fallback_enabled is False."""
+        client = self.make_client(baseten_fallback_enabled=False, budget_cap_usd=50.0)
+        result = await client.generate(
+            role="explorer",
+            prompt="test prompt",
+            model_override=BASETEN_MODEL_ID,
+            context_hints={"simulate_baseten_429": True},
         )
-        with self.assertRaises(RetryableProviderError):
-            await client.generate(
-                role="explorer",
-                prompt="test prompt",
-                context_hints={"simulate_meta_429": True},
-            )
+        self.assertTrue(result.fallback_used)
+        self.assertEqual(result.provider, "meta")
 
     async def test_fallback_callback_invoked(self):
         """When fallback occurs, the fallback_callback should be called with event payload."""
@@ -284,8 +297,7 @@ class TestFallbackBehavior(unittest.IsolatedAsyncioTestCase):
         async def capture_callback(payload):
             callback_data.append(payload)
 
-        client = ModelClient(
-            mock_mode=True,
+        client = self.make_client(
             baseten_fallback_enabled=True,
             budget_cap_usd=50.0,
             fallback_callback=capture_callback,
@@ -293,12 +305,12 @@ class TestFallbackBehavior(unittest.IsolatedAsyncioTestCase):
         result = await client.generate(
             role="explorer",
             prompt="test prompt",
-            context_hints={"simulate_meta_429": True},
+            context_hints={"simulate_baseten_429": True},
         )
         self.assertEqual(len(callback_data), 1)
         self.assertEqual(callback_data[0]["role"], "explorer")
-        self.assertEqual(callback_data[0]["from_provider"], "meta")
-        self.assertEqual(callback_data[0]["to_provider"], "baseten")
+        self.assertEqual(callback_data[0]["from_provider"], "baseten")
+        self.assertEqual(callback_data[0]["to_provider"], "meta")
 
 
 class TestUsageExtraction(unittest.TestCase):
@@ -358,20 +370,22 @@ class TestGenerationResultMetadata(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.fallback_used)
         self.assertIsNone(result.fallback_reason)
 
-    async def test_fallback_call_has_baseten_provider(self):
-        """Fallback call reports baseten provider and reason."""
+    async def test_fallback_call_has_meta_provider(self):
+        """Fallback call reports Meta provider and reason."""
         client = ModelClient(
             mock_mode=True,
+            api_key="test-meta",
+            baseten_api_key="test-baseten",
             baseten_fallback_enabled=True,
             budget_cap_usd=50.0,
         )
         result = await client.generate(
             role="explorer",
             prompt="test",
-            context_hints={"simulate_meta_429": True},
+            context_hints={"simulate_baseten_429": True},
         )
-        self.assertEqual(result.provider, "baseten")
-        self.assertEqual(result.model, BASETEN_MODEL_ID)
+        self.assertEqual(result.provider, "meta")
+        self.assertEqual(result.model, "muse-spark-1.3")
         self.assertTrue(result.fallback_used)
         self.assertIsNotNone(result.fallback_reason)
 

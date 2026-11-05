@@ -1309,6 +1309,8 @@ class MiniColosseumApp {
 
     try {
       // 1. Verify if credentials changed
+      let basetenKeyToStore = basetenKey;
+      let fallbackToStore = fallbackEnabled;
       if (metaKey || basetenKey) {
         const verify = await fetch("/api/keys/verify", {
           method: "POST",
@@ -1327,6 +1329,12 @@ class MiniColosseumApp {
           });
           return;
         }
+        if (result.warnings && result.warnings.baseten) {
+          const element = document.getElementById("setup-baseten-error");
+          if (element) element.textContent = result.warnings.baseten;
+          basetenKeyToStore = "";
+          fallbackToStore = false;
+        }
       }
 
       // 2. Persist
@@ -1335,9 +1343,9 @@ class MiniColosseumApp {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           api_key: metaKey || undefined,
-          baseten_api_key: basetenKey,
-          baseten_fallback_enabled: fallbackEnabled,
-          clear_baseten: basetenKey === "",
+          baseten_api_key: basetenKeyToStore,
+          baseten_fallback_enabled: fallbackToStore,
+          clear_baseten: basetenKeyToStore === "",
         }),
       });
       if (!store.ok) throw new Error("Key storage failed.");

@@ -1,13 +1,16 @@
 """
-Stage 3: Proof Decomposition Engine & Cycle Detection.
-Based on Section 5.3 of Mini-Colosseum Specification v1.0.
+Stage 3: Proof Decomposition Engine, Cycle Detection & Danus Fingerprinting.
+Based on Section 5.3 of Mini-Colosseum Specification v2.0.
 - Converts approved strategy into numbered subproblems in topological order
 - Each subproblem lists dependencies forming a DAG
 - Validates that graph is strictly acyclic (rejects cycles)
+- Danus Deterministic Fingerprints: computes SHA-256 fingerprints based on upstream dependencies
 - Generates LaTeX master-document skeleton with reserved placeholders
 """
 
 import time
+import hashlib
+import unicodedata
 from typing import Dict, Any, List, Callable, Awaitable, Tuple
 from ..models import Node, Edge, Event, SectionPlan, SubproblemSpec
 from ..client import ModelClient
@@ -16,6 +19,37 @@ from ..client import ModelClient
 class CycleDetectedError(Exception):
     """Raised when decomposition contains a dependency cycle."""
     pass
+
+
+def normalize_section_body(body: str) -> str:
+    """Normalize whitespace and Unicode (NFKC) for deterministic hashing (Section 6.6)."""
+    if not body:
+        return ""
+    normalized = unicodedata.normalize("NFKC", body)
+    return " ".join(normalized.split())
+
+
+def compute_body_hash(body: str) -> str:
+    """Compute SHA-256 hash of normalized section body (Section 6.6)."""
+    norm = normalize_section_body(body)
+    return hashlib.sha256(norm.encode("utf-8")).hexdigest()[:16]
+
+
+def compute_dependency_fingerprint(dep_hashes: Dict[str, str]) -> str:
+    """Compute fingerprint based on dependency IDs and their body hashes (Section 6.6)."""
+    sorted_deps = sorted(dep_hashes.items())
+    return hashlib.sha256(str(sorted_deps).encode("utf-8")).hexdigest()[:16]
+
+
+def compute_danus_fingerprint(target_claim: str, title: str, dep_fingerprints: Dict[str, str]) -> str:
+    """
+    Danus (Deterministic Fingerprints, 2026):
+    Every proof section in the DAG generates a SHA-256 fingerprint based on its target
+    claim and its upstream dependency fingerprints.
+    """
+    sorted_deps = sorted(dep_fingerprints.items())
+    raw = f"CLAIM:{target_claim}|TITLE:{title}|DEPS:{sorted_deps}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
 class DecompositionEngine:
@@ -74,9 +108,11 @@ class DecompositionEngine:
         model_decomposer: str = "muse-wonder-1.0",
     ) -> Tuple[Node, SectionPlan]:
         """
-        Decomposes approved strategy into topological subproblems and LaTeX skeleton.
+        Decomposes approved strategy into topological subproblems, computes Danus fingerprints,
+        and creates LaTeX skeleton.
         """
         dec_node_id = f"R{round_num}_DEC"
+        dec_route = self.client.get_route("decomposer", model_override=model_decomposer)
         dec_node = Node(
             id=dec_node_id,
             type="decomposer",
@@ -85,9 +121,12 @@ class DecompositionEngine:
             status="running",
             parents=[strategy_root.id],
             label=f"DEC_{round_num}",
-            model=model_decomposer,
+            model=dec_route.primary.model,
+            provider=dec_route.primary.provider,
+            primary_provider=dec_route.primary.provider,
+            primary_model=dec_route.primary.model,
             started_at=time.strftime("%Y-%m-%d %H:%M:%S"),
-            input_summary="Decompose approved strategy into topological subproblem DAG",
+            input_summary="Decompose approved strategy into topological subproblem DAG with Danus fingerprints",
         )
         self.save_node(run_id, dec_node)
 
@@ -119,7 +158,7 @@ class DecompositionEngine:
             "Ensure the dependencies form a strict Directed Acyclic Graph without cycles."
         )
 
-        out, t_in, t_cached, t_out, cost = await self.client.call(
+        call_res = await self.client.call(
             role="decomposer",
             prompt=prompt,
             model=model_decomposer,
@@ -128,10 +167,69 @@ class DecompositionEngine:
             reasoning_effort="high",
             context_hints={"problem": problem, "node_id": dec_node_id, "round": round_num},
         )
+        out, t_in, t_cached, t_out, cost = call_res
+        dec_node.provider = getattr(call_res, "provider", "meta")
+        dec_node.model = getattr(call_res, "model", model_decomposer)
+        dec_node.primary_provider = dec_route.primary.provider
+        dec_node.primary_model = dec_route.primary.model
+        dec_node.fallback_used = getattr(call_res, "fallback_used", False)
+        dec_node.fallback_reason = getattr(call_res, "fallback_reason", None)
 
-        # Validate DAG
+        # Validate DAG and enforce at most 6 sections (Section 6.1)
         subproblems_raw = out.get("subproblems", [])
-        self.validate_acyclic(subproblems_raw)
+        if len(subproblems_raw) > 6:
+            subproblems_raw = subproblems_raw[:6]
+
+        try:
+            topo_order = self.validate_acyclic(subproblems_raw)
+        except CycleDetectedError as err:
+            # Section 6.1: Ask once for a repair if cyclic
+            await self.emit_event(
+                Event(
+                    run_id=run_id,
+                    seq=0,
+                    timestamp=time.strftime("%H:%M:%S"),
+                    event_type="log_line",
+                    payload={
+                        "stage": "decomposition",
+                        "severity": "warning",
+                        "text": f"Cycle detected in decomposition: {err}. Requesting one-time repair from decomposer...",
+                        "node_id": dec_node.id,
+                    },
+                )
+            )
+            repair_prompt = (
+                f"Problem statement: {problem}\n\n"
+                f"The decomposition produced a cycle error: {err}.\n"
+                "Repair this decomposition into an ordered list of at most 6 subproblems forming a strict Directed Acyclic Graph (DAG) without cycles.\n"
+                "Each subproblem must specify: index, title, target_claim, and dependencies."
+            )
+            repair_out, r_in, r_cached, r_out, r_cost = await self.client.call(
+                role="decomposer",
+                prompt=repair_prompt,
+                model=model_decomposer,
+                schema=SectionPlan,
+                stable_prefix=knowledge_prefix,
+                reasoning_effort="high",
+            )
+            t_in += r_in
+            t_cached += r_cached
+            t_out += r_out
+            cost += r_cost
+            out = repair_out
+            subproblems_raw = out.get("subproblems", [])[:6]
+            topo_order = self.validate_acyclic(subproblems_raw)
+
+        # Compute Danus SHA-256 fingerprints in topological order
+        subproblems_by_index = {sp["index"]: sp for sp in subproblems_raw}
+        subproblem_fps: Dict[int, str] = {}
+        for idx in topo_order:
+            sp = subproblems_by_index[idx]
+            dep_fps = {str(dep): subproblem_fps[dep] for dep in sp.get("dependencies", []) if dep in subproblem_fps}
+            fp = compute_danus_fingerprint(sp.get("target_claim", ""), sp.get("title", ""), dep_fps)
+            sp["danus_fingerprint"] = fp
+            sp["dependency_fingerprints"] = dep_fps
+            subproblem_fps[idx] = fp
 
         dec_node.output = out
         dec_node.tokens_in = t_in
@@ -160,7 +258,10 @@ class DecompositionEngine:
                 payload={
                     "stage": "decomposition",
                     "severity": "info",
-                    "text": f"Decomposition accepted: {len(subproblems_raw)} subproblems generated in topological order.",
+                    "text": (
+                        f"Decomposition accepted: {len(subproblems_raw)} subproblems topologically sorted. "
+                        f"Danus SHA-256 fingerprints initialized (e.g. SEC_1: {subproblem_fps.get(1, '')[:8]}...)."
+                    ),
                     "node_id": dec_node.id,
                 },
             )

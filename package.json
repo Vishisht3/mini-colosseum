@@ -1,14 +1,43 @@
 {
   "name": "mini-colosseum",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "A research-harness workbench built on Meta Muse models, implementing Stellar Colosseum",
   "main": "electron/main.js",
   "scripts": {
-    "start": "./run.sh",
-    "backend": "python3 -m backend.main 8765",
-    "fixtures": "python3 -m backend.generate_fixtures",
-    "test": "python3 -m unittest discover -s tests -p 'test_*.py'",
-    "electron": "electron electron/main.js"
+    "start": "electron electron/main.js",
+    "start:browser": "python -m backend.main 8765",
+    "test": "python -m unittest discover -s tests -p \"test_*.py\"",
+    "test:frontend": "node frontend/js/reducer.test.js",
+    "pack:backend": "pyinstaller --noconfirm --onedir --name colosseum-backend --distpath electron/backend-build backend/main.py",
+    "dist": "electron-builder",
+    "dist:dir": "electron-builder --dir"
+  },
+  "build": {
+    "appId": "com.minicolosseum.workbench",
+    "productName": "Mini-Colosseum",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "files": [
+      "electron/**/*",
+      "frontend/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "electron/backend-build/colosseum-backend",
+        "to": "backend"
+      }
+    ]
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
   },
   "keywords": [
     "meta-muse",

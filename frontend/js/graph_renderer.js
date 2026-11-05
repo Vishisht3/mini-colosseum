@@ -1,11 +1,14 @@
 /**
- * Mini-Colosseum High-Density SVG Graph Renderer
- * Implements Section 6.6 conventions:
+ * Mini-Colosseum High-Density SVG Graph Renderer (v2.0)
+ * Implements the proof graph visual conventions:
  * - Rectangular nodes with short label and paired status glyph
- * - Small red-bordered falsifier attack tags attached to nodes
+ * - Small red-bordered review tags attached to nodes
  * - Retry counter badge on section nodes
- * - Overlapping reuse edges highlighted
- * - Pan, zoom, fit-to-screen, click-to-select (not draggable)
+ * - Deterministic SHA-256 fingerprint pills (d:hash)
+ * - Dynamic STALE / INVALIDATED indicators for upstream DAG changes
+ * - K=4 parallel rollouts badge for solver nodes
+ * - Overlapping reuse edges highlighted in blue cubic bezier
+ * - Pan, zoom, fit-to-screen, click-to-select
  */
 
 class GraphRenderer {
@@ -23,10 +26,10 @@ class GraphRenderer {
     this.startY = 0;
 
     this.layoutEngine = new HierarchicalLayout({
-      nodeWidth: 84,
-      nodeHeight: 34,
-      layerSpacing: 65,
-      nodeSpacing: 28,
+      nodeWidth: 96,
+      nodeHeight: 38,
+      layerSpacing: 70,
+      nodeSpacing: 32,
     });
 
     this.nodes = [];
@@ -102,15 +105,13 @@ class GraphRenderer {
   fitToScreen() {
     if (this.nodes.length === 0) return;
     const rect = this.svg.getBoundingClientRect();
-    // Guard: if SVG container is not yet visible (display:none), do nothing
     if (rect.width === 0 || rect.height === 0) return;
     const bbox = this.viewportGroup.getBBox();
     if (bbox.width === 0 || bbox.height === 0) {
-      // Fallback: compute bounding box from node positions manually
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
       this.nodes.forEach((n) => {
         const x = n.x || 0; const y = n.y || 0;
-        const w = n.width || 84; const h = n.height || 34;
+        const w = n.width || 96; const h = n.height || 38;
         minX = Math.min(minX, x - w / 2);
         minY = Math.min(minY, y - h / 2);
         maxX = Math.max(maxX, x + w / 2);
@@ -161,18 +162,24 @@ class GraphRenderer {
   getStatusStyle(status) {
     switch (status) {
       case "running":
-        return { bg: "#d0e4f7", border: "#2b78c5", text: "#0b3866", glyph: "~" };
+        return { bg: "#d0e4f7", border: "#2b78c5", text: "#0b3866", glyph: ".." };
       case "accepted":
         return { bg: "#d2edd9", border: "#2e8b57", text: "#0e4c27", glyph: "OK" };
       case "conditional":
-        return { bg: "#fdf0cd", border: "#d4a017", text: "#664d03", glyph: "?" };
+        return { bg: "#fdf0cd", border: "#d4a017", text: "#664d03", glyph: "~" };
       case "rejected":
         return { bg: "#f9d8d6", border: "#cb3837", text: "#781716", glyph: "X" };
       case "error":
         return { bg: "#781716", border: "#4d0f0e", text: "#ffffff", glyph: "!" };
+      case "blocked":
+        return { bg: "#fbe2d5", border: "#c04000", text: "#802000", glyph: "B" };
+      case "stale":
+        return { bg: "#fdf0cd", border: "#d4a017", text: "#664d03", glyph: "S" };
+      case "invalidated":
+        return { bg: "#eae8e2", border: "#8c8a82", text: "#555550", glyph: "-" };
       case "pending":
       default:
-        return { bg: "#ecece8", border: "#b8b8b0", text: "#444440", glyph: "-" };
+        return { bg: "#ecece8", border: "#b8b8b0", text: "#444440", glyph: " " };
     }
   }
 
@@ -203,7 +210,7 @@ class GraphRenderer {
         nodesHtml += `
           <g class="svg-node collapsed-group" data-id="${n.id}" transform="translate(${n.x - n.width / 2}, ${n.y - n.height / 2})">
             <rect width="${n.width}" height="${n.height}" fill="#eaeae5" stroke="#999990" stroke-dasharray="3,3" />
-            <text x="12" y="18" font-size="11" fill="#444440" font-weight="bold">${n.label}</text>
+            <text x="12" y="22" font-size="11" fill="#444440" font-weight="bold">${n.label}</text>
           </g>
         `;
         return;
@@ -217,21 +224,21 @@ class GraphRenderer {
       const label = n.label || n.id;
       const glyph = style.glyph;
 
-      // Falsifier tag: small red-bordered tag on attacked node
+      // Falsifier tag: small tag on attacked node
       let falsifierTag = "";
       if (n.falsifier_report) {
         const fVerdict = n.falsifier_report.verdict || "survives";
-        const tagText = fVerdict === "survives" ? "F:OK" : (fVerdict === "needs_repair" ? "F:repair" : "F:reject");
-        const tagColor = fVerdict === "survives" ? "#2e8b57" : "#cb3837";
+        const tagText = fVerdict === "survives" || fVerdict === "ready" ? "F:OK" : (fVerdict === "needs_repair" ? "F:repair" : "F:reject");
+        const tagColor = (fVerdict === "survives" || fVerdict === "ready") ? "#2e8b57" : "#cb3837";
         falsifierTag = `
-          <g transform="translate(46, -9)">
-            <rect width="42" height="15" fill="#ffffff" stroke="${tagColor}" stroke-width="1.2"/>
-            <text x="21" y="11" font-size="9" font-weight="bold" fill="${tagColor}" text-anchor="middle">${tagText}</text>
+          <g transform="translate(${n.width - 48}, -9)">
+            <rect width="44" height="15" fill="#ffffff" stroke="${tagColor}" stroke-width="1.2"/>
+            <text x="22" y="11" font-size="9" font-weight="bold" fill="${tagColor}" text-anchor="middle">${tagText}</text>
           </g>
         `;
       }
 
-      // Retry count badge for DAG section nodes
+      // Retry count badge for DAG section nodes (top-left)
       let retryBadge = "";
       if (n.retry_count && n.retry_count > 0) {
         retryBadge = `
@@ -242,13 +249,64 @@ class GraphRenderer {
         `;
       }
 
+      // K=4 Rollouts badge for solver nodes (bottom-left)
+      let rolloutsBadge = "";
+      const isSolver = n.type === "solver" || n.stage === "solving";
+      if (isSolver) {
+        let kCount = 4;
+        if (Array.isArray(n.rollouts) && n.rollouts.length > 0) {
+          kCount = n.rollouts.length;
+        }
+        rolloutsBadge = `
+          <g transform="translate(-4, ${n.height - 5})">
+            <rect width="34" height="14" fill="#f3e8fd" stroke="#75507b" stroke-width="1.1"/>
+            <text x="17" y="10" font-size="9" font-weight="bold" fill="#491b6d" text-anchor="middle">K=${kCount}</text>
+          </g>
+        `;
+      }
+
+      // Danus Fingerprint / Invalidation indicator (bottom-right)
+      let danusBadge = "";
+      let borderOverride = "";
+      if (n.is_invalidated) {
+        danusBadge = `
+          <g transform="translate(${n.width - 72}, ${n.height - 5})">
+            <rect width="74" height="14" fill="#f9d8d6" stroke="#cb3837" stroke-width="1.2"/>
+            <text x="37" y="10" font-size="8.5" font-weight="bold" fill="#781716" text-anchor="middle">INVALIDATED</text>
+          </g>
+        `;
+        borderOverride = 'stroke-dasharray="3,2" stroke="#cb3837" stroke-width="1.5"';
+      } else if (n.is_stale) {
+        danusBadge = `
+          <g transform="translate(${n.width - 52}, ${n.height - 5})">
+            <rect width="54" height="14" fill="#fdf0cd" stroke="#d4a017" stroke-width="1.2"/>
+            <text x="27" y="10" font-size="8.5" font-weight="bold" fill="#664d03" text-anchor="middle">STALE</text>
+          </g>
+        `;
+        borderOverride = 'stroke-dasharray="3,2" stroke="#d4a017" stroke-width="1.5"';
+      } else if (n.danus_fingerprint) {
+        const shortHash = n.danus_fingerprint.substring(0, 6);
+        danusBadge = `
+          <g transform="translate(${n.width - 56}, ${n.height - 5})">
+            <rect width="58" height="14" fill="#e8f0fe" stroke="#2b579a" stroke-width="1.0"/>
+            <text x="29" y="10" font-size="8.5" font-weight="bold" fill="#1b3a6b" text-anchor="middle">d:${shortHash}</text>
+          </g>
+        `;
+      }
+
+      const rectAttr = borderOverride
+        ? `class="node-box" width="${n.width}" height="${n.height}" fill="${style.bg}" ${borderOverride}`
+        : `class="node-box" width="${n.width}" height="${n.height}" fill="${style.bg}" stroke="${style.border}"`;
+
       nodesHtml += `
         <g class="svg-node ${selectedClass}" data-id="${n.id}" transform="translate(${n.x - n.width / 2}, ${n.y - n.height / 2})">
-          <rect class="node-box" width="${n.width}" height="${n.height}" fill="${style.bg}" stroke="${style.border}" />
-          <text x="8" y="22" font-size="11" font-weight="bold" fill="${style.text}">${label}</text>
-          <text x="${n.width - 8}" y="22" font-size="11" font-weight="bold" fill="${style.text}" text-anchor="end">${glyph}</text>
+          <rect ${rectAttr} />
+          <text x="8" y="23" font-size="11" font-weight="bold" fill="${style.text}">${label}</text>
+          <text x="${n.width - 8}" y="23" font-size="11" font-weight="bold" fill="${style.text}" text-anchor="end">${glyph}</text>
           ${falsifierTag}
           ${retryBadge}
+          ${rolloutsBadge}
+          ${danusBadge}
         </g>
       `;
     });

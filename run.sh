@@ -23,14 +23,14 @@ fi
 PORT=8765
 URL="http://127.0.0.1:${PORT}"
 
-# Ensure fixtures exist
-if [ ! -f "backend/fixtures/fixture_clean_success.json" ]; then
-    echo "Generating benchmark fixtures..."
-    python3 -m backend.generate_fixtures
-fi
 
-# Kill any existing process on port 8765
-lsof -ti :$PORT | xargs kill -9 2>/dev/null || true
+
+# Check if port is already in use; warn but don't kill unrelated services
+if lsof -ti :$PORT > /dev/null 2>&1; then
+    echo "Warning: Port $PORT is already in use."
+    echo "If this is a previous Mini-Colosseum instance, stop it first."
+    echo "Attempting to proceed anyway..."
+fi
 
 echo "Starting Python backend orchestrator on ${URL}..."
 python3 -m backend.main $PORT &
@@ -52,7 +52,7 @@ MAX_ATTEMPTS=25
 COUNT=0
 READY=0
 while [ $COUNT -lt $MAX_ATTEMPTS ]; do
-    if curl -s -f "${URL}/api/settings" >/dev/null 2>&1; then
+    if curl -s -f "${URL}/health" >/dev/null 2>&1; then
         READY=1
         break
     fi

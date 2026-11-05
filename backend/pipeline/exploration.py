@@ -76,6 +76,7 @@ class ExplorationEngine:
         async def create_leaf(idx: int) -> Node:
             node_id = f"R{round_num}_L0_{idx+1}"
             label = f"S{idx+1}" if round_num == 1 else f"R{round_num}.S{idx+1}"
+            exp_route = self.client.get_route("explorer", model_override=model_explorer)
             node = Node(
                 id=node_id,
                 type="explorer",
@@ -84,7 +85,10 @@ class ExplorationEngine:
                 status="running",
                 parents=[],
                 label=label,
-                model=model_explorer,
+                model=exp_route.primary.model,
+                provider=exp_route.primary.provider,
+                primary_model=exp_route.primary.model,
+                primary_provider=exp_route.primary.provider,
                 started_at=time.strftime("%Y-%m-%d %H:%M:%S"),
                 input_summary=f"Generate candidate research strategy for problem: {problem[:60]}...",
             )
@@ -108,7 +112,7 @@ class ExplorationEngine:
             if prior_context:
                 prompt += f"\n\nPrior round context and rejected aspects:\n{prior_context}"
 
-            out, t_in, t_cached, t_out, cost = await self.client.call(
+            call_res = await self.client.call(
                 role="explorer",
                 prompt=prompt,
                 model=model_explorer,
@@ -117,12 +121,20 @@ class ExplorationEngine:
                 reasoning_effort="low",
                 context_hints={"problem": problem, "node_id": node_id, "round": round_num},
             )
+            out, t_in, t_cached, t_out, cost = call_res
 
             node.output = out
+            node.analysis = out.get("analysis")
             node.tokens_in = t_in
             node.tokens_cached = t_cached
             node.tokens_out = t_out
             node.cost_usd = cost
+            node.provider = getattr(call_res, "provider", "meta")
+            node.model = getattr(call_res, "model", model_explorer)
+            node.primary_provider = exp_route.primary.provider
+            node.primary_model = exp_route.primary.model
+            node.fallback_used = getattr(call_res, "fallback_used", False)
+            node.fallback_reason = getattr(call_res, "fallback_reason", None)
 
             # Paired Falsifier Attack
             await self.emit_event(
@@ -221,6 +233,7 @@ class ExplorationEngine:
                 sampled_parents = random.sample(current_level_nodes, parent_count)
                 parent_ids = [p.id for p in sampled_parents]
 
+                agg_route = self.client.get_route("aggregator", model_override=model_aggregator)
                 agg_node = Node(
                     id=node_id,
                     type="aggregator",
@@ -229,7 +242,10 @@ class ExplorationEngine:
                     status="running",
                     parents=parent_ids,
                     label=label,
-                    model=model_aggregator,
+                    model=agg_route.primary.model,
+                    provider=agg_route.primary.provider,
+                    primary_model=agg_route.primary.model,
+                    primary_provider=agg_route.primary.provider,
                     started_at=time.strftime("%Y-%m-%d %H:%M:%S"),
                     input_summary=f"Aggregate {len(parent_ids)} candidates: {', '.join([p.label for p in sampled_parents])}",
                 )
@@ -258,25 +274,34 @@ class ExplorationEngine:
                         )
                     )
 
-                # Prepare aggregation prompt
+                # Stellar Colosseum: Critique-Preserving Trees
+                # Instead of dropping failed outputs, falsifier critiques remain attached
+                preserved_critiques = []
                 parents_summary = []
                 for p in sampled_parents:
+                    if p.falsifier_report:
+                        preserved_critiques.append({
+                            "candidate": p.label,
+                            "verdict": p.falsifier_report.get("verdict"),
+                            "objections": p.falsifier_report.get("categorized_objections", []),
+                            "assessment": p.falsifier_report.get("assessment", ""),
+                        })
                     parents_summary.append(
                         f"--- Candidate {p.label} ---\n"
                         f"Output: {p.output}\n"
-                        f"Falsifier Critique & Objections: {p.falsifier_report}\n"
+                        f"Preserved Falsifier Critique & Objections: {p.falsifier_report}\n"
                     )
 
                 prompt = (
                     f"Problem: {problem}\n\n"
-                    f"Synthesize the following {len(sampled_parents)} candidate routes and their paired critiques:\n\n"
+                    f"Synthesize the following {len(sampled_parents)} candidate routes with their preserved critiques:\n\n"
                     + "\n".join(parents_summary)
                     + "\n\nProduce one consolidated strategy card. "
                     "Address every serious objection: reject, weaken, repair, refute with a specific reason, or carry forward. "
                     "Never just average or pick one without synthesis."
                 )
 
-                out, t_in, t_cached, t_out, cost = await self.client.call(
+                call_res = await self.client.call(
                     role="aggregator",
                     prompt=prompt,
                     model=model_aggregator,
@@ -287,12 +312,29 @@ class ExplorationEngine:
                         "problem": problem,
                         "node_id": node_id,
                         "parents": [p.label for p in sampled_parents],
+                        "preserved_critiques": preserved_critiques,
                         "round": round_num,
                     },
                 )
+                out, t_in, t_cached, t_out, cost = call_res
+                if not out.get("preserved_critiques"):
+                    out["preserved_critiques"] = preserved_critiques
 
-                # Attach falsifier review on aggregator
-                f_prompt = f"Problem: {problem}\nAggregated strategy:\n{out}\nScrutinize the aggregated synthesis."
+                # Attach falsifier review on aggregator (Section 6.1: receives child reports and flags dropped objections)
+                child_critiques_summary = "\n".join([
+                    f"- Child candidate '{p.label}' objections: {p.falsifier_report.get('categorized_objections', []) if p.falsifier_report else 'none'}"
+                    for p in sampled_parents
+                ])
+                f_prompt = (
+                    f"Problem: {problem}\n\n"
+                    f"Aggregated strategy to scrutinize:\n{out}\n\n"
+                    f"Child Falsifier Reports from sampled candidates:\n{child_critiques_summary}\n\n"
+                    "Scrutinize the aggregated synthesis thoroughly:\n"
+                    "1. Evaluate whether the synthesized route resolves or weakens claimed lemmas.\n"
+                    "2. CRITICAL AUDIT: Check whether any fatal or major objections from the child reports were improperly "
+                    "dropped, bypassed, or ignored without an explicit mathematical resolution. If so, list them in 'dropped_objections'.\n"
+                    "3. Assign verdict: survives, needs_repair, reject, or falsified."
+                )
                 f_out, f_in, f_cached, f_out_tok, f_cost = await self.client.call(
                     role="falsifier",
                     prompt=f_prompt,
@@ -300,10 +342,22 @@ class ExplorationEngine:
                     schema=FalsifierReport,
                     stable_prefix=knowledge_prefix,
                     reasoning_effort="medium",
-                    context_hints={"problem": problem, "node_id": node_id, "round": round_num},
+                    context_hints={
+                        "problem": problem,
+                        "node_id": node_id,
+                        "round": round_num,
+                        "child_critiques": preserved_critiques,
+                    },
                 )
 
                 agg_node.output = out
+                agg_node.analysis = out.get("analysis")
+                agg_node.provider = getattr(call_res, "provider", "meta")
+                agg_node.model = getattr(call_res, "model", model_aggregator)
+                agg_node.primary_provider = agg_route.primary.provider
+                agg_node.primary_model = agg_route.primary.model
+                agg_node.fallback_used = getattr(call_res, "fallback_used", False)
+                agg_node.fallback_reason = getattr(call_res, "fallback_reason", None)
                 agg_node.falsifier_report = f_out
                 agg_node.objections = f_out.get("categorized_objections", [])
                 agg_node.tokens_in = t_in + f_in

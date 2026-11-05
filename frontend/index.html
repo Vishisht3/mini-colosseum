@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CoqIde - [proof.v] - Mini-Colosseum Research Harness</title>
+  <title>Mini-Colosseum - Live Proof Workspace</title>
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -14,16 +14,9 @@
         File
         <div class="dropdown-menu">
           <div class="dropdown-item" id="menu-new-run" onclick="window.app.showModal('modal-run-setup')">New Run / Custom Problem... <span>Ctrl+N</span></div>
+          <div class="dropdown-item" id="menu-open-file" onclick="window.app.showModal('modal-run-setup')">Problem Input &amp; Conjecture Setup... <span>Ctrl+N</span></div>
           <div class="dropdown-item" id="menu-open-history" onclick="window.app.openRunHistoryModal()">Run History &amp; Offline Replay... <span>Ctrl+O</span></div>
-          <div class="dropdown-divider"></div>
-          <div class="dropdown-item" onclick="window.app.loadFixture('clean_success')">Load Fixture: Clean Success</div>
-          <div class="dropdown-item" onclick="window.app.loadFixture('section_retry')">Load Fixture: Section Retry (HMED Record)</div>
-          <div class="dropdown-item" onclick="window.app.loadFixture('re_exploration')">Load Fixture: Re-exploration</div>
-          <div class="dropdown-divider"></div>
-          <div class="dropdown-item" id="menu-export-latex" onclick="window.app.exportDirect('latex')">Export Proof as LaTeX (.tex)</div>
-          <div class="dropdown-item" id="menu-export-json" onclick="window.app.exportDirect('json')">Export Full Trace as JSON (.json)</div>
-          <div class="dropdown-item" onclick="window.app.exportDirect('hmed')">Export HMED Revision Records (.jsonl)</div>
-          <div class="dropdown-item" onclick="window.app.exportDirect('objections')">Export Unresolved Objections (.md)</div>
+          <div class="dropdown-item" onclick="window.app.exportSelected('ledger.csv')">Save Ledger</div>
           <div class="dropdown-divider"></div>
           <div class="dropdown-item" onclick="window.close()">Quit</div>
         </div>
@@ -51,57 +44,54 @@
         </div>
       </div>
       <div class="menu-item" id="menu-tools">
-        Benchmark & Tools
+        Tools
         <div class="dropdown-menu">
-          <div class="dropdown-item" onclick="window.app.runBenchmarkEval()">Run 5-Lemma Evaluation Benchmark</div>
-          <div class="dropdown-item" onclick="window.app.showModal('modal-settings')">API Settings (Meta Keys & Models)...</div>
+          <div class="dropdown-item" onclick="window.app.showModal('modal-first-run-setup')">Key Configuration...</div>
+          <div class="dropdown-item" onclick="window.app.openSettingsModal()">Settings &amp; Model Routing...</div>
           <div class="dropdown-divider"></div>
-          <div class="dropdown-item" id="menu-help-about">About Mini-Colosseum v1.1...</div>
-          <div class="dropdown-item" onclick="window.open('https://arxiv.org/abs/2609.15983', '_blank')">Stellar Colosseum Paper (arXiv)</div>
+          <div class="dropdown-item" id="menu-help-about">About Mini-Colosseum v2.0...</div>
         </div>
       </div>
     </div>
 
+    <div class="reference-toolbar">
+      <button class="reference-icon" onclick="window.app.handleRunAll()" title="Run">▶</button>
+      <button class="reference-icon" onclick="window.app.apiPost('/api/runs/pause')" title="Pause">Ⅱ</button>
+      <button class="reference-icon stop" onclick="window.app.apiPost('/api/runs/stop')" title="Stop">■</button>
+      <button class="reference-icon" onclick="window.app.closeModals()" title="Reset">↻</button>
+      <input class="reference-input" id="toolbar-problem-title" placeholder="Problem statement">
+      <input class="reference-input conjecture-input" id="toolbar-conjecture" placeholder="Conjecture">
+      <button class="reference-run" onclick="window.app.handleRunAll()">Run Proof Engine</button>
+      <span class="reference-provider" id="reference-provider">Meta <b>[OFFLINE]</b> · Baseten <b>[OFFLINE]</b></span>
+      <span class="reference-spend" id="reference-spend">SPEND: $0.00 / $7.00</span>
+    </div>
+
     <!-- Highly Functional Toolbar: Zero Filler -->
-    <div class="toolbar">
+    <div class="toolbar legacy-toolbar">
       <!-- Direct Pipeline Execution Controls -->
-      <button class="btn-tool primary-action" id="btn-run-all" onclick="window.app.handleRunAll()" title="Run Complete Pipeline">
+      <button class="btn-tool primary-action" id="btn-run-all" onclick="window.app.handleRunAll()" title="Run Complete Pipeline (F5 / Ctrl+R)">
         <span style="color:#008800; font-size:12px;">▶</span> <strong>Run All</strong>
       </button>
-      <button class="btn-tool" id="btn-step-fwd" onclick="window.app.apiPost('/api/runs/step')" title="Step Forward one node/stage">
+      <button class="btn-tool" id="btn-step-fwd" onclick="window.app.stepForward()" title="Step Forward one node/stage (Ctrl+Right / Ctrl+Down)">
         <span style="color:#007700; font-size:12px;">⏭</span> Step
       </button>
-      <button class="btn-tool" id="btn-pause-exec" onclick="window.app.apiPost('/api/runs/pause')" title="Pause live run">
+      <button class="btn-tool" id="btn-step-back" onclick="window.app.stepBack()" title="Step Back in Replay (Ctrl+Left)">
+        <span style="color:#555500; font-size:12px;">⏮</span> Back
+      </button>
+      <button class="btn-tool" id="btn-run-end" onclick="window.app.runToEnd()" title="Run Replay to End (Ctrl+End)">
+        <span style="color:#000088; font-size:12px;">⏩</span> End
+      </button>
+      <button class="btn-tool" id="btn-pause-exec" onclick="window.app.apiPost('/api/runs/pause')" title="Pause live run (F6 / Ctrl+Up)">
         <span style="color:#666600; font-size:11px;">⏸</span> Pause
       </button>
-      <button class="btn-tool" id="btn-stop-exec" onclick="window.app.apiPost('/api/runs/stop')" title="Stop / Interrupt">
+      <button class="btn-tool" id="btn-stop-exec" onclick="window.app.apiPost('/api/runs/stop')" title="Stop / Interrupt (Shift+F5 / Ctrl+C)">
         <span style="color:#cc0000; font-size:11px;">⏹</span> Stop
       </button>
-      <button class="btn-tool" onclick="window.app.triggerReexplore()" title="Trigger Re-exploration round with critique feedback">
+      <button class="btn-tool" onclick="window.app.triggerReexplore()" title="Trigger Re-exploration round with critique feedback (Ctrl+E / Ctrl+R)">
         <span style="font-size:11px;">🔄</span> Re-explore
       </button>
 
       <div class="toolbar-separator"></div>
-
-      <!-- Problem Selector Dropdown Directly in Toolbar -->
-      <span class="toolbar-label">Problem:</span>
-      <select id="inline-problem-select" class="toolbar-select" style="max-width: 260px;" title="Select theorem to solve">
-        <option value="erdos_szekeres">Erdős-Szekeres Theorem (Monotonic Subsequences)</option>
-        <option value="oddtown">The Oddtown Theorem (Berlekamp 1969, F_2 vectors)</option>
-        <option value="ramsey_k6">Ramsey Number R(3, 3) = 6 (Triangle in K_6)</option>
-        <option value="mantel">Mantel's Theorem (Triangle-Free Graph Bound)</option>
-        <option value="girth5_indset">Planar Graph (Girth >= 5) Independent Set Bound</option>
-        <option value="custom">-- Custom Theorem (Edit in proof.v) --</option>
-      </select>
-
-      <!-- Preset Selector -->
-      <span class="toolbar-label">Preset:</span>
-      <select id="inline-preset-select" class="toolbar-select" title="Contraction tree size and k sampling">
-        <option value="Hackathon-v1.1">v1.1 (9-6-3-1, k=4)</option>
-        <option value="Small">Small (4-2-1, k=3)</option>
-        <option value="Medium">Medium (8-4-2-1, k=3)</option>
-        <option value="Paper">Paper Scale (16-8-4-1, k=5)</option>
-      </select>
 
       <div class="toolbar-separator"></div>
 
@@ -118,21 +108,26 @@
 
       <div class="toolbar-separator"></div>
 
-      <!-- Quick Export & Utilities -->
-      <button class="btn-tool" onclick="window.app.exportDirect('latex')" title="Export Proof as LaTeX (.tex)">
-        💾 .tex
+      <!-- Problem, ledger, and export controls -->
+      <button class="btn-tool" onclick="window.app.showModal('modal-run-setup')" title="Problem Input &amp; Conjecture Setup">
+        Problem
       </button>
-      <button class="btn-tool" onclick="window.app.exportDirect('json')" title="Export Full Trace (.json)">
-        💾 .json
+      <button class="btn-tool" onclick="window.app.openLedger()" title="Open cost ledger">
+        Ledger
       </button>
-      <button class="btn-tool" onclick="window.app.exportDirect('hmed')" title="Export HMED Revision Records (.jsonl)">
-        ⚡ HMED
-      </button>
-      <button class="btn-tool" onclick="window.app.openRunHistoryModal()" title="Run History & Offline Replay">
+      <label class="toolbar-label" for="export-select">Export:</label>
+      <select id="export-select" class="toolbar-select" onchange="window.app.exportSelected(this.value)">
+        <option value="">Choose...</option>
+        <option value="latex">Proof (LaTeX)</option>
+        <option value="markdown">Report (Markdown)</option>
+        <option value="ledger.csv">Ledger (CSV)</option>
+        <option value="json">Run trace (JSON)</option>
+      </select>
+      <button class="btn-tool" onclick="window.app.openRunHistoryModal()" title="Run History &amp; Offline Replay">
         📂 History
       </button>
-      <button class="btn-tool" onclick="window.app.showModal('modal-settings')" title="Meta Model API Settings">
-        ⚙ Settings
+      <button class="btn-tool" onclick="window.app.showModal('modal-first-run-setup')" title="Key Configuration">
+        ⚙ Keys
       </button>
     </div>
 
@@ -144,21 +139,21 @@
         <div class="tab-strip">
           <div class="tab-btn active" id="tab-btn-tree" data-tab="tree" onclick="window.app.switchTab('tree')">
             <span class="tab-status-dot"></span>
-            <span>🌲 Research Tree</span>
+            <span>🌲 Research Map</span>
           </div>
           <div class="tab-btn" id="tab-btn-dag" data-tab="dag" onclick="window.app.switchTab('dag')">
-            <span>📊 Proof DAG</span>
+            <span>📊 Dependency Map</span>
           </div>
           <div class="tab-btn" id="tab-btn-doc" data-tab="doc" onclick="window.app.switchTab('doc')">
             <span style="color:#aa0000; font-size:11px;">📄</span>
-            <span>proof.v (Document)</span>
+            <span>proof.v (Proof document)</span>
           </div>
         </div>
 
         <!-- Sunken Frame containing active view -->
         <div class="sunken-frame">
           <!-- Research Tree Tab (Active by Default) -->
-          <div class="tab-content active" id="tab-tree">
+          <div class="tab-content" id="tab-tree">
             <div class="graph-viewport" id="tree-canvas-container"></div>
             <div class="graph-controls">
               <button class="btn-graph-ctl" id="btn-fit-tree" onclick="window.app.treeRenderer.fitToScreen()" title="Fit to Screen">Fit</button>
@@ -176,13 +171,11 @@
           </div>
 
           <!-- Document / Coq Script View with Gutter Line Numbers -->
-          <div class="tab-content" id="tab-doc">
+          <div class="tab-content active" id="tab-doc">
             <div class="editor-layout">
-              <div class="gutter-lines" id="editor-gutter">
-                1<br>2<br>3<br>4<br>5<br>6<br>7<br>8<br>9<br>10<br>11<br>12<br>13<br>14<br>15<br>16<br>17<br>18<br>19<br>20<br>21<br>22
-              </div>
+              <div class="gutter-lines" id="editor-gutter">1</div>
               <div class="coq-script-editor" id="document-content" contenteditable="false">
-                <!-- Dynamically populated with evaluated green region & syntax highlighted proof -->
+                <!-- Dynamically populated with the assembled proof -->
               </div>
             </div>
           </div>
@@ -192,60 +185,96 @@
       <!-- Resizer Horizontal Divider with grip -->
       <div class="resizer-x" id="resizer-x"></div>
 
+      <!-- Persistent proof preview -->
+      <div class="pane preview-pane" id="preview-pane">
+        <div class="pane-titlebar">
+          <strong>Proof preview</strong>
+        </div>
+        <div class="preview-content" id="live-preview-content">
+          <div class="preview-problem" id="preview-problem">No proof text yet.</div>
+        </div>
+      </div>
+
+      <div class="resizer-x" id="resizer-preview"></div>
+
       <!-- Right Pane: Subgoals & Goals Inspector (Top) and Messages & Event Log (Bottom) -->
       <div class="pane right-pane" id="right-pane">
         <!-- Top Pane: Interactive Goals & Inspector -->
         <div class="sunken-frame" id="inspector-container" style="flex: 1.25;">
           <!-- Tabbed Inspector View -->
           <div class="subgoal-tabs-bar">
-            <div class="subgoal-tab active" id="tab-insp-goals" onclick="window.app.switchInspectorTab('goals')">Subgoals (Coq Style)</div>
-            <div class="subgoal-tab" id="tab-insp-details" onclick="window.app.switchInspectorTab('details')">Node Details</div>
-            <div class="subgoal-tab" id="tab-insp-falsifier" onclick="window.app.switchInspectorTab('falsifier')">Falsifier Attack</div>
-            <div class="subgoal-tab" id="tab-insp-hmed" onclick="window.app.switchInspectorTab('hmed')">HMED Revisions</div>
+            <div class="subgoal-tab active" id="tab-insp-goals" onclick="window.app.switchInspectorTab('goals')">Sections</div>
+            <div class="subgoal-tab" id="tab-insp-details" onclick="window.app.switchInspectorTab('details')">Details</div>
+            <div class="subgoal-tab" id="tab-insp-falsifier" onclick="window.app.switchInspectorTab('falsifier')">Review</div>
+            <div class="subgoal-tab" id="tab-insp-verifier" onclick="window.app.switchInspectorTab('verifier')">Verification</div>
+            <div class="subgoal-tab" id="tab-insp-hmed" onclick="window.app.switchInspectorTab('hmed')">Revision History</div>
+            <div class="subgoal-tab" id="tab-insp-knowledge" onclick="window.app.switchInspectorTab('knowledge')">Reference Notes</div>
           </div>
 
           <div class="coq-goals-pane" id="coq-goals-container">
-            <!-- View 1: Active Subgoals (Matches Reference Image) -->
+            <!-- View 1: Active Subgoals (4 Subgoals Structure) -->
             <div id="view-insp-goals">
-              <div class="coq-goals-header" id="coq-subgoals-count">2 subgoals</div>
-              
+              <div class="coq-goals-header" id="coq-subgoals-count">4 sections (Selected: SEC_1)</div>
+
               <div class="coq-hypotheses" id="coq-hypotheses-text">
-n : nat
-IHn : forall m : nat, {n = m} + {n &lt;&gt; m}
-m : nat
-Hm : n = m
+Selected section : SEC_1
+Status          : Accepted
+Progress        : Ready
               </div>
 
-              <!-- CoqIDE Horizontal Subgoal line (1/2) -->
               <div class="coq-subgoal-line">
-                <span class="coq-subgoal-tag" id="tag-subgoal-1">(1/2)</span>
+                <span class="coq-subgoal-tag" id="tag-subgoal-1">(1/4) Problem target</span>
               </div>
-              <div class="coq-goal-target" id="target-subgoal-1" onclick="window.app.jumpToSubgoal(1)">S m = S m</div>
+              <div class="coq-goal-target" id="target-subgoal-1">Prove subproblem obligation.</div>
 
-              <!-- CoqIDE Horizontal Subgoal line (2/2) -->
               <div class="coq-subgoal-line">
-                <span class="coq-subgoal-tag" id="tag-subgoal-2">(2/2)</span>
+                <span class="coq-subgoal-tag" id="tag-subgoal-2">(2/4) Proposed approach</span>
               </div>
-              <div class="coq-goal-target" id="target-subgoal-2" onclick="window.app.jumpToSubgoal(2)">{S n = S m} + {S n &lt;&gt; S m}</div>
+              <div class="coq-goal-target" id="target-subgoal-2">Construct dual monotonic length label map i -> (a_i, b_i).</div>
+
+              <div class="coq-subgoal-line">
+                <span class="coq-subgoal-tag" id="tag-subgoal-3">(3/4) Review result</span>
+              </div>
+              <div class="coq-goal-target" id="target-subgoal-3" style="color:#781716;">Section 1 proof satisfies claimed target.</div>
+
+              <div class="coq-subgoal-line">
+                <span class="coq-subgoal-tag" id="tag-subgoal-4">(4/4) Open issues</span>
+              </div>
+              <div class="coq-goal-target" id="target-subgoal-4" style="color:#555500;">No open issues.</div>
             </div>
 
-            <!-- View 2: Node Details -->
             <div id="view-insp-details" style="display: none;">
               <div id="insp-meta-text" style="color: #000000; margin-bottom: 8px;"></div>
-              <div class="coq-subgoal-line"><span class="coq-subgoal-tag">(Prompt Summary)</span></div>
+
+              <div class="coq-subgoal-line"><span class="coq-subgoal-tag">(Structured details)</span></div>
+              <div id="insp-analysis-content" style="background:#f4f3ec; border:1px solid #c8c6bc; padding:6px; margin-bottom:8px; font-size:11px;">
+                <!-- Populated with available_info, plan, uncertainties -->
+              </div>
+
+              <div class="coq-subgoal-line"><span class="coq-subgoal-tag">(Input summary)</span></div>
               <pre id="insp-input-content" style="white-space: pre-wrap; font-size:11px; margin-bottom:8px;"></pre>
-              <div class="coq-subgoal-line"><span class="coq-subgoal-tag">(Structured Output)</span></div>
+
+              <div class="coq-subgoal-line"><span class="coq-subgoal-tag">(Output summary)</span></div>
               <pre id="insp-output-content" style="white-space: pre-wrap; font-size:11px;"></pre>
             </div>
 
-            <!-- View 3: Falsifier Report -->
             <div id="view-insp-falsifier" style="display: none;">
-              <div id="insp-falsifier-content" style="white-space: pre-wrap; color: #550000;">No falsifier report attached.</div>
+              <div id="insp-falsifier-content" style="white-space: pre-wrap; color: #550000;">No review is available for this section.</div>
             </div>
 
-            <!-- View 4: HMED Revision Records -->
+            <div id="view-insp-verifier" style="display: none;">
+              <div id="insp-verifier-content" style="white-space: pre-wrap;">No verification result is available yet.</div>
+            </div>
+
             <div id="view-insp-hmed" style="display: none;">
-              <div id="insp-hmed-content" style="white-space: pre-wrap;">No revision records yet. When a section is rejected and retries, its (failed draft, critique, revised draft) tuple is stored here for Meta HMED distillation.</div>
+              <div id="insp-hmed-content" style="white-space: pre-wrap;">No revision history is available yet.</div>
+            </div>
+
+            <div id="view-insp-knowledge" style="display: none;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <span style="font-weight: bold; font-size: 11px;">Reference notes</span>
+              </div>
+              <div id="insp-knowledge-content" style="white-space: pre-wrap; font-size: 11px; background: #faf9f5; border: 1px solid #dcdad0; padding: 6px; max-height: 240px; overflow-y: auto;">No reference notes recorded yet.</div>
             </div>
           </div>
         </div>
@@ -258,6 +287,8 @@ Hm : n = m
           <div class="messages-toolbar">
             <span><strong>Console &amp; Execution Events</strong></span>
             <div style="display: flex; gap: 4px; align-items: center;">
+              <label>Search:</label>
+              <input type="text" id="log-search-input" placeholder="Search logs..." class="toolbar-select" style="height: 18px; padding: 0 4px; width: 110px; font-size: 11px;">
               <label>Filter:</label>
               <select id="log-filter-severity" class="toolbar-select" style="height: 18px; padding: 0 2px;">
                 <option value="all">All</option>
@@ -269,41 +300,61 @@ Hm : n = m
             </div>
           </div>
           <div class="coq-messages-pane" id="event-log-stream">
-            <div class="coq-msg-line">CoqIde started. Welcome to Mini-Colosseum Research Harness v1.1.</div>
-            <div class="coq-msg-line">Ready in Predicate_Logic, proving theorem.</div>
+            <div class="coq-msg-line">Mini-Colosseum is ready.</div>
+            <div class="coq-msg-line">Provider connections will appear here during a run.</div>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- Authentic Sunken Status Bar -->
+    <!-- Authentic Sunken Status Bar with Dual Budget Monitors -->
     <div class="status-bar">
-      <div class="status-segment main" id="status-main-label">Ready in Predicate_Logic, proving theorem</div>
-      <div class="status-segment" id="badge-problem" style="max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Theorem: oddtown</div>
+      <div class="status-segment main" id="status-main-label">Ready</div>
+      <div class="status-segment" id="badge-problem" style="max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Ready</div>
       <div class="status-segment" id="status-stage-label">Stage: READY</div>
       <div class="status-segment" id="status-calls">Calls: 0</div>
       <div class="status-segment" id="status-tokens">0k tok</div>
-      <div class="status-segment" id="status-cost">$0.00 / $20.00</div>
-      <div class="status-segment coqide-badge" id="status-connection">Coqide started</div>
+      <div class="status-segment" id="status-meta-budget" title="Meta Model API (muse-wonder-1.0) Pool: $150 Limit">Meta: $0.00 / $150</div>
+      <div class="status-segment" id="status-baseten-budget" title="Baseten (muse-spark-open-1026) Pool: $100 Limit">Baseten: $0.00 / $100</div>
+      <div class="status-segment" id="status-cost" title="Active Run Budget and Hard Cap">SPEND: $0.00 / $7.00</div>
+      <div class="status-segment fireworks-status" id="fireworks-status"></div>
+    </div>
+
+    <!-- Permanent Transparency & Data-Sharing Notice (FR10) -->
+    <div class="disclaimer-bar">
+      <span>⚖ <strong>Permanent Notice:</strong> All proof verdicts &amp; objections are produced by AI model reviewers (Wonder 1.0 &amp; Spark Open), not by a formal interactive proof assistant. Credit-funded API calls are subject to Meta's developer data-sharing policy for model improvement.</span>
     </div>
   </div>
 
-  <!-- Modal: Run Setup / Custom Problem -->
+  <!-- Modal: Problem Input & Conjecture Setup -->
   <div class="modal-overlay" id="modal-run-setup">
     <div class="modal-window" style="width: 580px;">
       <div class="modal-header">
-        <span>New Run / Custom Theorem</span>
+        <span>Problem Input &amp; Conjecture Setup</span>
         <button class="btn-close-modal" onclick="window.app.closeModals()">&#10005;</button>
       </div>
       <div class="modal-content">
         <div class="form-group">
-          <label class="form-label">Theorem Statement (Informal or Formal):</label>
-          <textarea class="form-input" id="input-problem" rows="4" style="width: 100%; font-family: var(--font-mono); font-size: 11px;" placeholder="e.g. Prove that every planar graph with girth >= 5 has an independent set of size at least n / 3."></textarea>
+          <label class="form-label">Problem statement:</label>
+          <textarea class="form-input" id="input-problem" rows="6" style="width: 100%; font-family: var(--font-mono); font-size: 11px;" placeholder="Enter a problem in plain English, LaTeX, Markdown, or a mix."></textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Attach documents:</label>
+          <div id="attachment-drop-zone" class="attachment-drop-zone">
+            <input class="form-input" id="input-attachments" type="file" accept=".pdf,.doc,.docx,.tex" multiple>
+            <div class="form-help">Drop PDF, DOC, DOCX, or TEX files here, or choose files.</div>
+          </div>
+          <div id="attachment-list" class="attachment-list"></div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Budget cap (USD):</label>
+          <input class="form-input" id="input-run-budget-cap" type="number" min="0.5" step="0.5" value="7.00">
+          <span class="form-help">Auto-stops when reached</span>
         </div>
       </div>
       <div class="modal-footer">
-        <button class="btn-tool btn-close-modal" onclick="window.app.closeModals()">Cancel</button>
-        <button class="btn-tool" style="font-weight: bold;" onclick="window.app.handleRunAll()">Start Run</button>
+        <button class="btn-tool" onclick="window.app.saveProblemDraft()">Save Setup</button>
+        <button class="btn-tool primary-action" style="font-weight: bold;" onclick="window.app.handleRunAll()">Run Proof Engine</button>
       </div>
     </div>
   </div>
@@ -315,56 +366,197 @@ Hm : n = m
         <span>Run History &amp; Offline Replay</span>
         <button class="btn-close-modal" onclick="window.app.closeModals()">&#10005;</button>
       </div>
+
+      <!-- Modal: Cost Ledger -->
+      <div class="modal-overlay" id="modal-ledger">
+        <div class="modal-window ledger-window">
+          <div class="modal-header">
+            <span>Run Ledger</span>
+            <button class="btn-close-modal" onclick="window.app.closeModals()">&#10005;</button>
+          </div>
+          <div class="ledger-summary" id="ledger-summary"></div>
+          <div class="ledger-toolbar">
+            <label><input type="checkbox" id="ledger-follow-latest" checked> Follow latest</label>
+          </div>
+          <div class="ledger-table-wrap">
+            <table class="ledger-table">
+              <thead>
+                <tr>
+                  <th>Step #</th><th>Stage</th><th>Node</th><th>Model</th>
+                  <th id="ledger-cost-header" class="cost-header">Cost (USD)</th><th>Share of run</th>
+                </tr>
+              </thead>
+              <tbody id="ledger-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
       <div class="modal-content">
         <div style="font-size: 11px; margin-bottom: 6px;">
-          Saved runs stored in SQLite. Select any run to replay and inspect offline:
+          Saved runs stored in SQLite / JSONL. Select any run to replay and inspect offline:
         </div>
         <div id="history-runs-list" style="max-height: 260px; overflow-y: auto; background: #ffffff; border: 1px solid #706e68;"></div>
       </div>
       <div class="modal-footer">
+        <input type="file" id="input-import-jsonl" accept=".jsonl" style="display:none;" onchange="window.app.handleFileImportJsonl(event)">
+        <button class="btn-tool" onclick="window.app.triggerImportJsonl()">Import .jsonl</button>
         <button class="btn-tool btn-close-modal" onclick="window.app.closeModals()">Close</button>
       </div>
     </div>
   </div>
 
-  <!-- Modal: Settings -->
-  <div class="modal-overlay" id="modal-settings">
-    <div class="modal-window">
+  <!-- Modal: First-Run API Key Setup -->
+  <div class="modal-overlay locked-modal" id="modal-first-run-setup">
+    <div class="modal-window" style="width: 520px; border: 2px solid #2b579a;">
       <div class="modal-header">
-        <span>Settings | Meta Muse Configuration</span>
+        <span>Connect your model providers</span>
         <button class="btn-close-modal" onclick="window.app.closeModals()">&#10005;</button>
       </div>
       <div class="modal-content">
-        <div class="form-group">
-          <label class="form-label">Meta Model API Key:</label>
-          <input class="form-input" id="input-api-key" type="password" placeholder="Enter META_API_KEY (stored in keychain / session)">
-          <span style="font-size: 10px; color: #555;">Leave blank to use high-fidelity offline simulation mode.</span>
+        <!-- Meta Model API (Required) -->
+        <div class="provider-setup-section" style="margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid #c8c6bc;">
+          <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px;">
+            <strong>Meta Model API</strong>
+            <span style="color: #2b579a; font-weight: bold; font-size: 11px;">Required</span>
+          </div>
+          <div class="form-help" style="margin-bottom: 6px;">Required for Muse Spark 1.3 and Muse Wonder 1.0.</div>
+          <div class="form-group">
+            <label class="form-label">Meta API Key:</label>
+            <div class="password-field">
+              <input class="form-input" id="setup-input-api-key" type="password" placeholder="Enter Meta API key">
+              <button type="button" class="eye-toggle" data-target="setup-input-api-key">Show</button>
+            </div>
+            <div id="setup-meta-error" class="field-error"></div>
+          </div>
         </div>
-        <div class="form-group">
-          <label class="form-label">API Base URL:</label>
-          <input class="form-input" id="input-base-url" value="https://api.meta.ai/v1">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Budget Cap (USD):</label>
-          <input class="form-input" id="input-budget-cap" type="number" step="1.0" value="20.0">
-        </div>
-        <div class="form-group">
-          <label class="form-label" style="font-weight: normal;">
-            <input type="checkbox" id="setting-cross-model" checked> Cross-Model Adversarial Collaboration (Spark vs Wonder)
-          </label>
+
+        <!-- Baseten (Optional Fallback) -->
+        <div class="provider-setup-section">
+          <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px;">
+            <strong>Baseten</strong>
+            <span style="color: #666660; font-weight: bold; font-size: 11px;">Optional Fallback</span>
+          </div>
+          <div class="form-help" style="margin-bottom: 6px;">Add Baseten credentials to enable automatic fallback for supported Muse Spark requests.</div>
+          <div class="form-group">
+            <label class="form-label">Baseten API Key (optional):</label>
+            <div class="password-field">
+              <input class="form-input" id="setup-input-baseten-key" type="password" placeholder="Enter Baseten API key (optional)">
+              <button type="button" class="eye-toggle" data-target="setup-input-baseten-key">Show</button>
+            </div>
+            <div id="setup-baseten-error" class="field-error"></div>
+          </div>
+          <div class="form-group" style="margin-top: 6px;">
+            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 11px;">
+              <input type="checkbox" id="setup-checkbox-baseten-fallback">
+              <strong>Enable Baseten fallback</strong>
+            </label>
+            <div class="form-help" style="margin-left: 20px;">Use Muse Spark Open (meta-models/muse-spark-open-1026) when an eligible Meta Spark request cannot be completed.</div>
+          </div>
+          <div class="form-help" style="margin-top: 8px; font-style: italic; color: #555;">
+            * Muse Wonder always uses Meta. Baseten is never used for Wonder calls.
+          </div>
         </div>
       </div>
-      <div class="modal-footer">
-        <button class="btn-tool btn-close-modal" onclick="window.app.closeModals()">Cancel</button>
-        <button class="btn-tool" id="btn-save-settings" style="font-weight: bold;" onclick="window.app.handleSaveSettings()">Save</button>
+      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center;">
+        <button class="btn-tool" onclick="window.app.closeModals()">Cancel</button>
+        <button class="btn-tool" id="btn-save-first-run" style="font-weight: bold; background: #2b579a; color: #ffffff;" onclick="window.app.handleSaveFirstRunKeys()">Save &amp; Connect</button>
       </div>
     </div>
   </div>
 
-  <!-- Scripts -->
+  <!-- Modal: Settings & Preferences -->
+  <div class="modal-overlay" id="modal-settings">
+    <div class="modal-window" style="width: 560px; max-height: 85vh; display: flex; flex-direction: column;">
+      <div class="modal-header">
+        <span>Settings &amp; Model Routing</span>
+        <button class="btn-close-modal" onclick="window.app.closeModals()">&#10005;</button>
+      </div>
+      <div class="modal-content" style="overflow-y: auto; padding-right: 8px;">
+        <!-- Provider Endpoints -->
+        <div style="margin-bottom: 12px; font-weight: bold; font-size: 11px; text-transform: uppercase; color: #2b579a; border-bottom: 1px solid #c8c6bc; padding-bottom: 4px;">Provider Endpoints</div>
+        <div class="form-group" style="margin-bottom: 8px;">
+          <label class="form-label">Meta API Key (leave blank to keep current):</label>
+          <input class="form-input" id="input-api-key" type="password" placeholder="Update Meta API key">
+        </div>
+        <div class="form-group" style="margin-bottom: 8px;">
+          <label class="form-label">Baseten API Key (leave blank to keep current):</label>
+          <input class="form-input" id="input-baseten-key" type="password" placeholder="Update Baseten API key">
+        </div>
+        <div class="form-group" style="margin-bottom: 8px;">
+          <label class="form-label">Meta Model API Base URL:</label>
+          <input class="form-input" id="input-base-url" type="text" placeholder="https://api.meta.ai/v1">
+        </div>
+        <div class="form-group" style="margin-bottom: 14px;">
+          <label class="form-label">Baseten Fallback API Base URL:</label>
+          <input class="form-input" id="input-baseten-url" type="text" placeholder="https://inference.baseten.co/v1">
+        </div>
+        <div class="form-group" style="margin-bottom: 14px;">
+          <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 11px;">
+            <input type="checkbox" id="input-baseten-fallback">
+            <strong>Enable Baseten fallback</strong>
+          </label>
+        </div>
+
+        <!-- Runtime Defaults -->
+        <div style="margin-bottom: 12px; font-weight: bold; font-size: 11px; text-transform: uppercase; color: #2b579a; border-bottom: 1px solid #c8c6bc; padding-bottom: 4px;">Runtime Defaults</div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 14px;">
+          <div class="form-group">
+            <label class="form-label">Default Budget ($):</label>
+            <input class="form-input" id="input-budget-cap" type="number" step="0.5" min="0.5" value="7.0">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Reasoning Effort:</label>
+            <select class="form-input" id="input-reasoning-effort">
+              <option value="low">Low</option>
+              <option value="medium" selected>Medium</option>
+              <option value="high">High</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Concurrency Limit:</label>
+            <input class="form-input" id="input-concurrency" type="number" min="1" max="10" value="4">
+          </div>
+        </div>
+
+        <!-- Model Routing Configuration -->
+        <div style="margin-bottom: 12px; font-weight: bold; font-size: 11px; text-transform: uppercase; color: #2b579a; border-bottom: 1px solid #c8c6bc; padding-bottom: 4px;">Role Model Configuration</div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+          <div class="form-group">
+            <label class="form-label">Explorer Model (Spark):</label>
+            <input class="form-input" id="input-model-explorer" type="text" value="muse-spark-1.3">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Solver Model (Spark):</label>
+            <input class="form-input" id="input-model-solver" type="text" value="muse-spark-1.3">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Aggregator Model (Spark):</label>
+            <input class="form-input" id="input-model-aggregator" type="text" value="muse-spark-1.3">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Decomposer Model (Wonder):</label>
+            <input class="form-input" id="input-model-decomposer" type="text" value="muse-wonder-1.0">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Falsifier Model (Wonder):</label>
+            <input class="form-input" id="input-model-falsifier" type="text" value="muse-wonder-1.0">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Global Verifier Model (Wonder):</label>
+            <input class="form-input" id="input-model-verifier" type="text" value="muse-wonder-1.0">
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
+        <button class="btn-tool" onclick="window.app.closeModals()">Cancel</button>
+        <button class="btn-tool primary-action" style="font-weight: bold; background: #2b579a; color: #ffffff;" onclick="window.app.handleSaveSettings()">Save Settings</button>
+      </div>
+    </div>
+  </div>\n\n  <!-- Scripts -->
   <script src="js/dagre_layout.js"></script>
   <script src="js/graph_renderer.js"></script>
   <script src="js/katex_simple.js"></script>
+  <script src="js/reducer.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

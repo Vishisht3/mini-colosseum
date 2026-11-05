@@ -45,6 +45,7 @@ class ReadinessGateEngine:
         Returns: (gate_node, verdict)
         """
         gate_node_id = f"R{round_num}_GATE"
+        gate_route = self.client.get_route("gate", model_override=model_gate)
         gate_node = Node(
             id=gate_node_id,
             type="gate",
@@ -53,7 +54,10 @@ class ReadinessGateEngine:
             status="running",
             parents=[root_node.id],
             label=f"GATE_{round_num}",
-            model=model_gate,
+            model=gate_route.primary.model,
+            provider=gate_route.primary.provider,
+            primary_provider=gate_route.primary.provider,
+            primary_model=gate_route.primary.model,
             started_at=time.strftime("%Y-%m-%d %H:%M:%S"),
             input_summary=f"Audit root candidate {root_node.label} for decomposition readiness",
         )
@@ -82,17 +86,21 @@ class ReadinessGateEngine:
             f"Original Problem: {problem}\n\n"
             f"Candidate Root Strategy to Audit:\n{root_node.output}\n\n"
             f"Falsifier Attacks and Objections:\n{root_node.falsifier_report}\n\n"
-            "Audit this strategy card thoroughly:\n"
+            "Audit this strategy card thoroughly per Section 6.1 and Appendix A:\n"
             "1. Fatal bridge claims: are there unproven leaps of faith?\n"
             "2. Cited theorems: are hypotheses properly satisfied?\n"
             "3. Target equivalence: does this actually prove the target statement?\n"
             "4. Hidden hard steps: is a difficult subproblem swept under the rug?\n"
             "5. Unresolved falsifier objections.\n\n"
-            "Return JSON with verdict ('ready for decomposition', 'eligible with explicit obligations', 'needs further exploration', or 'reject'), "
-            "fatal_bridge_claims, cited_theorems, target_equivalence, hidden_hard_steps, obligation_severity ('none', 'minor', 'major'), and explanation."
+            "Return JSON matching Appendix A Gate Decision schema:\n"
+            "- decision: 'ready', 'ready_with_obligations', 'explore_more', or 'reject'\n"
+            "- blocking_issues: list of fatal issues (if any)\n"
+            "- obligations: list of objects {id, severity ('minor' or 'major'), assigned_section}\n"
+            "- rationale: explanation of the readiness evaluation\n"
+            "Rule: A major obligation or unresolved fatal bridge must trigger decision='explore_more'."
         )
 
-        out, t_in, t_cached, t_out, cost = await self.client.call(
+        call_res = await self.client.call(
             role="gate",
             prompt=prompt,
             model=model_gate,
@@ -100,19 +108,41 @@ class ReadinessGateEngine:
             reasoning_effort="high",
             context_hints={"problem": problem, "node_id": gate_node_id, "round": round_num},
         )
+        out, t_in, t_cached, t_out, cost = call_res
 
         gate_node.output = out
         gate_node.tokens_in = t_in
         gate_node.tokens_cached = t_cached
         gate_node.tokens_out = t_out
         gate_node.cost_usd = cost
+        gate_node.provider = getattr(call_res, "provider", "meta")
+        gate_node.model = getattr(call_res, "model", model_gate)
+        gate_node.primary_provider = gate_route.primary.provider
+        gate_node.primary_model = gate_route.primary.model
+        gate_node.fallback_used = getattr(call_res, "fallback_used", False)
+        gate_node.fallback_reason = getattr(call_res, "fallback_reason", None)
         gate_node.finished_at = time.strftime("%Y-%m-%d %H:%M:%S")
 
-        verdict = out.get("verdict", "ready for decomposition")
-        if verdict in ["ready for decomposition", "eligible with explicit obligations"]:
-            gate_node.status = "accepted" if verdict == "ready for decomposition" else "conditional"
+        decision = out.get("decision") or out.get("verdict", "ready")
+        # Check for major obligations
+        obligations = out.get("obligations", [])
+        has_major = any(o.get("severity") == "major" for o in obligations if isinstance(o, dict))
+
+        if has_major and decision in ["ready", "ready_with_obligations"]:
+            decision = "explore_more"
+
+        if decision in ["ready", "ready for decomposition"]:
+            gate_node.status = "accepted"
+            verdict = "ready for decomposition"
+        elif decision in ["ready_with_obligations", "eligible with explicit obligations"]:
+            gate_node.status = "conditional"
+            verdict = "eligible with explicit obligations"
+        elif decision == "explore_more":
+            gate_node.status = "rejected"
+            verdict = "needs further exploration"
         else:
             gate_node.status = "rejected"
+            verdict = "reject"
 
         self.save_node(run_id, gate_node)
         await self.emit_event(

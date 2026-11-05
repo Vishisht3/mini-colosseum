@@ -1,12 +1,17 @@
 """
-Model Client for Meta Muse Models (and High-Fidelity Simulator)
+Model Client for Mini-Colosseum v2.0
 Handles:
-- OpenAI-compatible endpoint calls (https://api.meta.ai/v1)
-- Exponential backoff & jitter on HTTP 429
-- Token accounting and exact cost tracking against pricing table
-- Hard budget cap enforcement
-- Prompt caching optimization
-- Robust structured output validation & repair
+- Primary Provider: Meta Model API (muse-spark-1.3, muse-wonder-1.0)
+- Fallback Provider: Baseten (meta-models/muse-spark-open-1026) for eligible Spark roles
+- Strict fallback policy:
+  - 429 rate limit / quota exhaustion -> retry, then Baseten fallback
+  - 500-599 server errors -> retry, then Baseten fallback
+  - Network / timeout failures -> retry, then Baseten fallback
+  - 401 auth / 400 bad request / 404 model not found -> raise immediately without fallback
+  - Wonder 1.0 never falls back to Baseten
+- Accurate provider-specific accounting (Meta expenditure vs Baseten expenditure)
+- Atomic in-flight budget reservations
+- Robust token extraction and structured JSON validation
 """
 
 import json
@@ -14,16 +19,106 @@ import time
 import asyncio
 import random
 import logging
-from typing import Dict, Any, Optional, Tuple, Type
+from typing import Dict, Any, Optional, Tuple, Type, Callable, Awaitable, List
 from pydantic import BaseModel
-from .config import PRICING_TABLE, RATE_LIMITS, META_API_BASE_URL, META_API_KEY
+from .config import (
+    PRICING_TABLE,
+    RATE_LIMITS,
+    META_API_BASE_URL,
+    META_API_KEY,
+    BASETEN_API_BASE_URL,
+    BASETEN_API_KEY,
+    BASETEN_MODEL_ID,
+    DEFAULT_RUN_BUDGET_CAP,
+    DEFAULT_META_BUDGET_CAP,
+    DEFAULT_BASETEN_BUDGET_CAP,
+    MODEL_ROUTES,
+    RoleRoute,
+    RouteTarget,
+    get_model_pricing,
+    ROLE_OUTPUT_TOKEN_CAPS,
+)
 
 logger = logging.getLogger("mini_colosseum.client")
 
 
 class BudgetExceededError(Exception):
-    """Raised when the cumulative spend exceeds the configured cap."""
+    """Raised when the cumulative spend or reservation exceeds a configured cap."""
     pass
+
+
+class RetryableProviderError(Exception):
+    """Exception indicating that an API call failed with a retryable or fallback-eligible error."""
+    def __init__(self, message: str, status_code: Optional[int] = None, is_quota: bool = False):
+        super().__init__(message)
+        self.status_code = status_code
+        self.is_quota = is_quota
+
+
+class NonRetryableProviderError(Exception):
+    """Exception indicating that an API call failed with a fatal, non-fallback error (401, 400, 404)."""
+    def __init__(self, message: str, status_code: Optional[int] = None):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class GenerationResult(tuple):
+    """
+    5-tuple subclass returning (output, tokens_in, tokens_cached, tokens_out, cost)
+    while also exposing metadata attributes: provider, model, fallback_used, fallback_reason.
+    """
+    def __new__(
+        cls,
+        output: Dict[str, Any],
+        tokens_in: int,
+        tokens_cached: int,
+        tokens_out: int,
+        cost: float,
+        provider: str = "meta",
+        model: str = "",
+        fallback_used: bool = False,
+        fallback_reason: Optional[str] = None,
+    ):
+        instance = super().__new__(cls, (output, tokens_in, tokens_cached, tokens_out, cost))
+        instance.output = output
+        instance.tokens_in = tokens_in
+        instance.tokens_cached = tokens_cached
+        instance.tokens_out = tokens_out
+        instance.cost = cost
+        instance.provider = provider
+        instance.model = model
+        instance.fallback_used = fallback_used
+        instance.fallback_reason = fallback_reason
+        return instance
+
+
+def safe_extract_usage(usage: Any, prompt_text: str, completion_text: str) -> Tuple[int, int, int]:
+    """Safely extract prompt, cached, and completion tokens from dict or typed SDK object."""
+    if usage is None:
+        return max(1, len(prompt_text) // 4), 0, max(1, len(completion_text) // 4)
+
+    tokens_in = getattr(usage, "prompt_tokens", None)
+    if tokens_in is None and isinstance(usage, dict):
+        tokens_in = usage.get("prompt_tokens")
+    if tokens_in is None:
+        tokens_in = max(1, len(prompt_text) // 4)
+
+    tokens_out = getattr(usage, "completion_tokens", None)
+    if tokens_out is None and isinstance(usage, dict):
+        tokens_out = usage.get("completion_tokens")
+    if tokens_out is None:
+        tokens_out = max(1, len(completion_text) // 4)
+
+    tokens_cached = 0
+    prompt_details = getattr(usage, "prompt_tokens_details", None)
+    if prompt_details is None and isinstance(usage, dict):
+        prompt_details = usage.get("prompt_tokens_details")
+    if isinstance(prompt_details, dict):
+        tokens_cached = prompt_details.get("cached_tokens", 0) or 0
+    elif prompt_details is not None:
+        tokens_cached = getattr(prompt_details, "cached_tokens", 0) or 0
+
+    return int(tokens_in), int(tokens_cached), int(tokens_out)
 
 
 class ModelClient:
@@ -31,34 +126,126 @@ class ModelClient:
         self,
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
-        budget_cap_usd: float = 20.0,
+        baseten_api_key: Optional[str] = None,
+        baseten_base_url: Optional[str] = None,
+        baseten_fallback_enabled: bool = False,
+        budget_cap_usd: float = DEFAULT_RUN_BUDGET_CAP,
+        budget_cap_meta_usd: float = DEFAULT_META_BUDGET_CAP,
+        budget_cap_baseten_usd: float = DEFAULT_BASETEN_BUDGET_CAP,
         mock_mode: bool = False,
+        fallback_callback: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
+        **kwargs,  # Accept unused legacy parameters safely
     ):
         self.api_key = api_key or META_API_KEY
         self.base_url = base_url or META_API_BASE_URL
-        self.budget_cap_usd = budget_cap_usd
-        # If no API key is provided, default to high-fidelity mock mode
-        self.mock_mode = mock_mode or not bool(self.api_key)
+        self.baseten_api_key = baseten_api_key or BASETEN_API_KEY
+        self.baseten_base_url = baseten_base_url or BASETEN_API_BASE_URL
+        self.baseten_fallback_enabled = baseten_fallback_enabled
 
+        self.budget_cap_usd = budget_cap_usd
+        self.budget_cap_meta_usd = budget_cap_meta_usd
+        self.budget_cap_baseten_usd = budget_cap_baseten_usd
+
+        self.mock_mode = mock_mode
+        self.fallback_callback = fallback_callback
+
+        # Aggregate accounting
         self.cumulative_cost_usd = 0.0
         self.total_tokens_in = 0
         self.total_tokens_cached = 0
         self.total_tokens_out = 0
         self.total_calls = 0
-        self.lock = asyncio.Lock()
 
-        # Simulated or real client
-        self._openai_client = None
-        if not self.mock_mode and self.api_key:
+        # Provider-specific accounting (Meta API vs Baseten)
+        self.cumulative_meta_usd = 0.0
+        self.cumulative_baseten_usd = 0.0
+        self.total_meta_tokens_in = 0
+        self.total_meta_tokens_cached = 0
+        self.total_meta_tokens_out = 0
+        self.total_baseten_tokens_in = 0
+        self.total_baseten_tokens_cached = 0
+        self.total_baseten_tokens_out = 0
+
+        # Concurrency-safe in-flight budget reservations
+        self.reserved_cost_usd = 0.0
+        self.reserved_meta_usd = 0.0
+        self.reserved_baseten_usd = 0.0
+        self.warned_80_percent = False
+
+        self._lock = None
+
+        # Two independent clients
+        self.meta_client = None
+        self.baseten_client = None
+
+        if not self.mock_mode:
             try:
                 from openai import AsyncOpenAI
-                self._openai_client = AsyncOpenAI(
-                    api_key=self.api_key,
-                    base_url=self.base_url,
-                )
+                if self.api_key:
+                    self.meta_client = AsyncOpenAI(
+                        api_key=self.api_key,
+                        base_url=self.base_url,
+                    )
+                if self.baseten_api_key:
+                    self.baseten_client = AsyncOpenAI(
+                        api_key=self.baseten_api_key,
+                        base_url=self.baseten_base_url,
+                    )
             except Exception as e:
-                logger.warning(f"Failed to initialize AsyncOpenAI client: {e}. Falling back to mock mode.")
-                self.mock_mode = True
+                raise RuntimeError(f"Failed to initialize OpenAI client(s): {e}") from e
+
+    @property
+    def lock(self) -> asyncio.Lock:
+        """Lazy event-loop safe lock."""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if self._lock is None or (loop and getattr(self._lock, "_loop", None) not in (loop, None)):
+            self._lock = asyncio.Lock()
+        return self._lock
+
+    def get_route(self, role: str, model_override: Optional[str] = None) -> RoleRoute:
+        """Get typed route configuration for role or explicit model override."""
+        base_route = MODEL_ROUTES.get(role)
+        if base_route is None:
+            # Default to Meta spark with baseten fallback if unknown drafting role
+            base_route = RoleRoute(
+                primary=RouteTarget(provider="meta", model="muse-spark-1.3"),
+                fallback=RouteTarget(provider="baseten", model=BASETEN_MODEL_ID),
+            )
+
+        if not model_override:
+            return base_route
+
+        # Handle explicit model override while preserving Wonder constraint
+        if "wonder" in model_override:
+            return RoleRoute(
+                primary=RouteTarget(provider="meta", model=model_override),
+                fallback=None,
+            )
+        if "spark-open" in model_override or model_override == BASETEN_MODEL_ID:
+            return RoleRoute(
+                primary=RouteTarget(provider="baseten", model=BASETEN_MODEL_ID),
+                fallback=None,
+            )
+        if "spark" in model_override:
+            return RoleRoute(
+                primary=RouteTarget(provider="meta", model=model_override),
+                fallback=RouteTarget(provider="baseten", model=BASETEN_MODEL_ID),
+            )
+
+        # Fallback generic
+        return RoleRoute(
+            primary=RouteTarget(provider=self.get_provider(model_override), model=model_override),
+            fallback=None,
+        )
+
+    def get_provider(self, model: str) -> str:
+        """Determine routing provider: 'baseten' for Spark Open, 'meta' for Spark 1.3 / Wonder."""
+        if "spark-open" in model or model == BASETEN_MODEL_ID or model.startswith("meta-models/"):
+            return "baseten"
+        return "meta"
 
     def compute_cost(
         self,
@@ -66,10 +253,10 @@ class ModelClient:
         tokens_in: int,
         tokens_cached: int,
         tokens_out: int,
+        provider: Optional[str] = None,
     ) -> float:
-        """Compute cost according to the pricing table per million tokens."""
-        pricing = PRICING_TABLE.get(model, PRICING_TABLE["muse-spark-1.3"])
-        # Standard input is non-cached input
+        """Compute estimated cost according to pricing table per million tokens."""
+        pricing = get_model_pricing(model, provider=provider)
         uncached_in = max(0, tokens_in - tokens_cached)
         cost = (
             (uncached_in / 1_000_000.0) * pricing["input"]
@@ -78,26 +265,25 @@ class ModelClient:
         )
         return round(cost, 6)
 
-    async def call(
+    def estimate_call_cost(self, model: str, prompt: str, role: str, provider: Optional[str] = None) -> float:
+        """Pre-call cost estimation."""
+        est_in = max(100, len(prompt) // 4)
+        base_est_out = 800 if role in ["solver", "explorer", "decomposer"] else 400
+        est_out = min(base_est_out, ROLE_OUTPUT_TOKEN_CAPS.get(role, base_est_out))
+        return self.compute_cost(model, est_in, 0, est_out, provider=provider)
+
+    async def generate(
         self,
         role: str,
         prompt: str,
-        model: str,
         schema: Optional[Type[BaseModel]] = None,
+        model_override: Optional[str] = None,
         stable_prefix: str = "",
         reasoning_effort: str = "medium",
         context_hints: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[Dict[str, Any], int, int, int, float]:
-        """
-        Execute model call with budget check, retry with backoff, token tracking, and structured validation.
-        Returns: (parsed_json_output, tokens_in, tokens_cached, tokens_out, cost_usd)
-        """
-        async with self.lock:
-            if self.cumulative_cost_usd >= self.budget_cap_usd:
-                raise BudgetExceededError(
-                    f"Cumulative cost (${self.cumulative_cost_usd:.4f}) exceeded budget cap (${self.budget_cap_usd:.2f})"
-                )
-
+    ) -> GenerationResult:
+        """Central inference method implementing primary Meta execution with eligible Baseten fallback."""
+        route = self.get_route(role, model_override=model_override)
         full_prompt = (
             f"=== STABLE PREFIX (CACHED) ===\n{stable_prefix}\n\n"
             f"=== DYNAMIC PROMPT ===\n{prompt}"
@@ -105,56 +291,295 @@ class ModelClient:
             else prompt
         )
 
-        if self.mock_mode:
-            return await self._mock_call(role, full_prompt, model, schema, context_hints)
+        # 1. Check reservation against Primary
+        primary_est_cost = self.estimate_call_cost(route.primary.model, full_prompt, role, provider=route.primary.provider)
 
-        # Real Meta Model API call via OpenAI SDK
-        return await self._real_call(role, full_prompt, model, schema, reasoning_effort)
+        async with self.lock:
+            projected = self.cumulative_cost_usd + self.reserved_cost_usd + primary_est_cost
+            if projected >= 0.8 * self.budget_cap_usd and not self.warned_80_percent:
+                self.warned_80_percent = True
+                logger.warning(
+                    f"[Budget Warning 80%] Projected spend (${projected:.4f}) reached 80% of cap (${self.budget_cap_usd:.2f})"
+                )
 
-    async def _real_call(
+            if projected > self.budget_cap_usd:
+                raise BudgetExceededError(
+                    f"Estimated upcoming call cost (${primary_est_cost:.4f}) would exceed run budget cap (${self.budget_cap_usd:.2f}). "
+                    f"Current spend: ${self.cumulative_cost_usd:.4f}, in-flight: ${self.reserved_cost_usd:.4f}"
+                )
+
+            if route.primary.provider == "meta":
+                if (self.cumulative_meta_usd + self.reserved_meta_usd + primary_est_cost) > self.budget_cap_meta_usd:
+                    raise BudgetExceededError(
+                        f"Estimated call would exceed Meta spending cap (${self.budget_cap_meta_usd:.2f})"
+                    )
+            elif route.primary.provider == "baseten":
+                if (self.cumulative_baseten_usd + self.reserved_baseten_usd + primary_est_cost) > self.budget_cap_baseten_usd:
+                    raise BudgetExceededError(
+                        f"Estimated call would exceed Baseten spending cap (${self.budget_cap_baseten_usd:.2f})"
+                    )
+
+            # Reserve primary
+            self.reserved_cost_usd += primary_est_cost
+            if route.primary.provider == "baseten":
+                self.reserved_baseten_usd += primary_est_cost
+            else:
+                self.reserved_meta_usd += primary_est_cost
+
+        # Try Primary Execution
+        try:
+            if self.mock_mode:
+                return await self._mock_call(role, full_prompt, route.primary.model, schema, context_hints, provider=route.primary.provider)
+            else:
+                return await self._execute_provider_with_retry(
+                    provider=route.primary.provider,
+                    model=route.primary.model,
+                    role=role,
+                    full_prompt=full_prompt,
+                    schema=schema,
+                    reasoning_effort=reasoning_effort,
+                    max_attempts=3,  # Initial attempt + 2 retries
+                )
+        except RetryableProviderError as exc:
+            # Check if fallback is eligible
+            logger.warning(f"Primary call ({route.primary.provider}/{route.primary.model}) encountered retryable failure: {exc}")
+            can_fallback = (
+                self.baseten_fallback_enabled
+                and route.fallback is not None
+                and (self.baseten_client is not None or self.mock_mode)
+            )
+
+            if not can_fallback:
+                logger.error(f"Fallback ineligible or disabled. Re-raising: {exc}")
+                raise
+
+            # Release primary reservation and check Baseten budget
+            fallback_est_cost = self.estimate_call_cost(route.fallback.model, full_prompt, role, provider=route.fallback.provider)
+            async with self.lock:
+                # Release Meta reservation
+                self.reserved_cost_usd = max(0.0, self.reserved_cost_usd - primary_est_cost)
+                if route.primary.provider == "baseten":
+                    self.reserved_baseten_usd = max(0.0, self.reserved_baseten_usd - primary_est_cost)
+                else:
+                    self.reserved_meta_usd = max(0.0, self.reserved_meta_usd - primary_est_cost)
+
+                # Check Baseten & total cap
+                if (self.cumulative_cost_usd + self.reserved_cost_usd + fallback_est_cost) > self.budget_cap_usd:
+                    raise BudgetExceededError(
+                        f"Fallback call cost (${fallback_est_cost:.4f}) would exceed run budget cap (${self.budget_cap_usd:.2f})"
+                    )
+                if (self.cumulative_baseten_usd + self.reserved_baseten_usd + fallback_est_cost) > self.budget_cap_baseten_usd:
+                    raise BudgetExceededError(
+                        f"Fallback call cost (${fallback_est_cost:.4f}) would exceed Baseten spending cap (${self.budget_cap_baseten_usd:.2f})"
+                    )
+
+                # Reserve Baseten
+                self.reserved_cost_usd += fallback_est_cost
+                self.reserved_baseten_usd += fallback_est_cost
+
+            # Record / emit fallback event
+            fallback_payload = {
+                "role": role,
+                "from_provider": route.primary.provider,
+                "from_model": route.primary.model,
+                "to_provider": route.fallback.provider,
+                "to_model": route.fallback.model,
+                "reason": str(exc),
+            }
+            logger.info(f"Triggering provider fallback: {fallback_payload}")
+            if self.fallback_callback:
+                try:
+                    await self.fallback_callback(fallback_payload)
+                except Exception as fb_err:
+                    logger.warning(f"Error calling fallback_callback: {fb_err}")
+
+            # Execute Fallback (bounded 2 attempts on Baseten: initial + 1 retry)
+            try:
+                if self.mock_mode:
+                    result = await self._mock_call(
+                        role, full_prompt, route.fallback.model, schema, context_hints,
+                        provider=route.fallback.provider, fallback_used=True, fallback_reason=str(exc)
+                    )
+                else:
+                    result = await self._execute_provider_with_retry(
+                        provider=route.fallback.provider,
+                        model=route.fallback.model,
+                        role=role,
+                        full_prompt=full_prompt,
+                        schema=schema,
+                        reasoning_effort=reasoning_effort,
+                        max_attempts=2,
+                        fallback_used=True,
+                        fallback_reason=str(exc),
+                    )
+                return result
+            finally:
+                async with self.lock:
+                    self.reserved_cost_usd = max(0.0, self.reserved_cost_usd - fallback_est_cost)
+                    self.reserved_baseten_usd = max(0.0, self.reserved_baseten_usd - fallback_est_cost)
+        finally:
+            async with self.lock:
+                self.reserved_cost_usd = max(0.0, self.reserved_cost_usd - primary_est_cost)
+                if route.primary.provider == "baseten":
+                    self.reserved_baseten_usd = max(0.0, self.reserved_baseten_usd - primary_est_cost)
+                else:
+                    self.reserved_meta_usd = max(0.0, self.reserved_meta_usd - primary_est_cost)
+
+    async def call(
         self,
         role: str,
-        full_prompt: str,
+        prompt: str,
+        model: Optional[str] = None,
+        schema: Optional[Type[BaseModel]] = None,
+        stable_prefix: str = "",
+        reasoning_effort: str = "medium",
+        context_hints: Optional[Dict[str, Any]] = None,
+    ) -> GenerationResult:
+        """Direct call interface backwards-compatible with 5-tuple callers."""
+        return await self.generate(
+            role=role,
+            prompt=prompt,
+            schema=schema,
+            model_override=model,
+            stable_prefix=stable_prefix,
+            reasoning_effort=reasoning_effort,
+            context_hints=context_hints,
+        )
+
+    async def _execute_provider_with_retry(
+        self,
+        provider: str,
         model: str,
+        role: str,
+        full_prompt: str,
         schema: Optional[Type[BaseModel]],
         reasoning_effort: str,
-    ) -> Tuple[Dict[str, Any], int, int, int, float]:
-        max_retries = 5
+        max_attempts: int,
+        fallback_used: bool = False,
+        fallback_reason: Optional[str] = None,
+    ) -> GenerationResult:
+        """Execute chat completion with typed OpenAI error handling, backoff, and usage parsing."""
+        from openai import (
+            RateLimitError,
+            APIConnectionError,
+            APITimeoutError,
+            InternalServerError,
+            APIStatusError,
+            AuthenticationError,
+            BadRequestError,
+            NotFoundError,
+        )
+
+        client = self.baseten_client if provider == "baseten" else self.meta_client
+        if client is None:
+            raise RuntimeError(f"Client for provider '{provider}' is not configured.")
+
+        system_instruction = (
+            f"You are a Mini-Colosseum research agent acting as '{role}'. "
+            "You must strictly return your answer as valid JSON matching the requested schema."
+        )
+        if "spark-open" in model or model == BASETEN_MODEL_ID:
+            system_instruction += (
+                " You must structure your output with a top-level '<analysis>' or 'analysis' block "
+                "containing available_info, plan, and uncertainties before final proof content."
+            )
+        if role in ["global_verifier", "section_falsifier"]:
+            system_instruction += (
+                " For every reported defect or objection, you MUST include an 'exact_quote' field containing "
+                "a verbatim substring from the source LaTeX text."
+            )
+
+        messages = [
+            {"role": "system", "content": system_instruction},
+            {"role": "user", "content": full_prompt},
+        ]
+
+        kwargs: Dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "temperature": 0.2 if role in ["gate", "global_verifier", "decomposer"] else 0.7,
+            "max_tokens": ROLE_OUTPUT_TOKEN_CAPS.get(role, 1200),
+        }
+        if schema is not None:
+            kwargs["response_format"] = {"type": "json_object"}
+        if provider == "meta" and reasoning_effort and reasoning_effort in ["low", "medium", "high"]:
+            kwargs["reasoning"] = {"effort": reasoning_effort}
+            kwargs["reasoning_effort"] = reasoning_effort
+
+        last_error = None
         base_delay = 1.0
 
-        for attempt in range(max_retries):
+        for attempt in range(max_attempts):
+            response = None
             try:
-                messages = [
-                    {
-                        "role": "system",
-                        "content": (
-                            f"You are a Mini-Colosseum research agent acting as '{role}'. "
-                            "You must strictly return your answer as valid JSON matching the requested schema."
-                        ),
-                    },
-                    {"role": "user", "content": full_prompt},
-                ]
+                response = await client.chat.completions.create(**kwargs)
+            except AuthenticationError as e:
+                logger.error(f"Authentication failed on {provider}: {e}")
+                raise NonRetryableProviderError(f"Authentication failed on {provider}: {e}", status_code=401) from e
+            except BadRequestError as e:
+                err_text = str(e).lower()
+                if (
+                    ("reasoning_effort" in kwargs or "reasoning" in kwargs)
+                    and ("reasoning_effort" in err_text or "reasoning" in err_text)
+                ):
+                    logger.warning(f"Provider {provider} does not support reasoning controls. Retrying without them...")
+                    kwargs.pop("reasoning_effort", None)
+                    kwargs.pop("reasoning", None)
+                    continue
+                logger.error(f"Bad request on {provider}: {e}")
+                raise NonRetryableProviderError(f"Bad request on {provider}: {e}", status_code=400) from e
+            except NotFoundError as e:
+                logger.error(f"Model not found on {provider}: {e}")
+                raise NonRetryableProviderError(f"Model '{model}' not found on {provider}: {e}", status_code=404) from e
+            except RateLimitError as e:
+                error_msg = str(e).lower()
+                is_quota = "quota" in error_msg or "insufficient" in error_msg or "balance" in error_msg
+                last_error = RetryableProviderError(f"Rate limit exceeded on {provider}: {e}", status_code=429, is_quota=is_quota)
+                if is_quota or attempt == max_attempts - 1:
+                    raise last_error
 
-                kwargs: Dict[str, Any] = {
-                    "model": model,
-                    "messages": messages,
-                    "temperature": 0.2 if role in ["gate", "global_verifier", "decomposer"] else 0.7,
-                }
+                # Exponential backoff with jitter
+                delay = base_delay * (2 ** attempt) + random.uniform(0.1, 0.5)
+                # Check for Retry-After header if available
+                retry_after = getattr(e, "response", None) and getattr(e.response, "headers", {}).get("retry-after")
+                if retry_after:
+                    try:
+                        delay = max(delay, float(retry_after))
+                    except (ValueError, TypeError):
+                        pass
+                logger.warning(f"HTTP 429 on {provider} ({model}). Retrying in {delay:.2f}s (attempt {attempt+1}/{max_attempts})...")
+                await asyncio.sleep(delay)
+                continue
+            except (InternalServerError, APIConnectionError, APITimeoutError) as e:
+                status_code = getattr(e, "status_code", 500)
+                last_error = RetryableProviderError(f"Transient error on {provider}: {e}", status_code=status_code)
+                if attempt == max_attempts - 1:
+                    raise last_error
+                delay = base_delay * (2 ** attempt) + random.uniform(0.1, 0.4)
+                logger.warning(f"Transient error ({type(e).__name__}) on {provider}. Retrying in {delay:.2f}s...")
+                await asyncio.sleep(delay)
+                continue
+            except APIStatusError as e:
+                if 500 <= e.status_code <= 599:
+                    last_error = RetryableProviderError(f"Server status {e.status_code} on {provider}: {e}", status_code=e.status_code)
+                    if attempt == max_attempts - 1:
+                        raise last_error
+                    await asyncio.sleep(base_delay * (2 ** attempt) + random.uniform(0.1, 0.3))
+                    continue
+                else:
+                    raise NonRetryableProviderError(f"API status error {e.status_code} on {provider}: {e}", status_code=e.status_code) from e
+            except Exception as e:
+                raise NonRetryableProviderError(f"Unexpected non-retryable error on {provider}: {e}") from e
 
-                if schema is not None:
-                    # Request JSON response format
-                    kwargs["response_format"] = {"type": "json_object"}
+            # Network call succeeded: extract content safely outside retry loop
+            if response is not None:
+                message = response.choices[0].message
+                raw_text = message.content or ""
+                if not raw_text.strip() and hasattr(message, "reasoning_content") and message.reasoning_content:
+                    raw_text = message.reasoning_content
 
-                response = await self._openai_client.chat.completions.create(**kwargs)
-                raw_text = response.choices[0].message.content or "{}"
-                
-                # Usage extraction
-                usage = response.usage
-                tokens_in = usage.prompt_tokens if usage else len(full_prompt) // 4
-                tokens_out = usage.completion_tokens if usage else len(raw_text) // 4
-                tokens_cached = getattr(usage, "prompt_tokens_details", {}).get("cached_tokens", 0) if usage else 0
-
-                cost = self.compute_cost(model, tokens_in, tokens_cached, tokens_out)
+                tokens_in, tokens_cached, tokens_out = safe_extract_usage(response.usage, full_prompt, raw_text)
+                cost = self.compute_cost(model, tokens_in, tokens_cached, tokens_out, provider=provider)
 
                 async with self.lock:
                     self.cumulative_cost_usd += cost
@@ -163,28 +588,39 @@ class ModelClient:
                     self.total_tokens_out += tokens_out
                     self.total_calls += 1
 
-                # Parse and validate JSON
+                    if provider == "baseten":
+                        self.cumulative_baseten_usd += cost
+                        self.total_baseten_tokens_in += tokens_in
+                        self.total_baseten_tokens_cached += tokens_cached
+                        self.total_baseten_tokens_out += tokens_out
+                    else:
+                        self.cumulative_meta_usd += cost
+                        self.total_meta_tokens_in += tokens_in
+                        self.total_meta_tokens_cached += tokens_cached
+                        self.total_meta_tokens_out += tokens_out
+
                 parsed = self._extract_json(raw_text)
-                if schema:
-                    validated = schema.model_validate(parsed)
-                    return validated.model_dump(), tokens_in, tokens_cached, tokens_out, cost
-                return parsed, tokens_in, tokens_cached, tokens_out, cost
+                if schema is not None:
+                    parsed = self._validate_or_repair_schema(parsed, schema, role, raw_text)
 
-            except Exception as e:
-                error_str = str(e)
-                if "429" in error_str or "rate limit" in error_str.lower():
-                    delay = base_delay * (2 ** attempt) + random.uniform(0.1, 0.5)
-                    logger.warning(f"HTTP 429 Rate limit on {model}. Retrying in {delay:.2f}s (attempt {attempt+1}/{max_retries})...")
-                    await asyncio.sleep(delay)
-                elif attempt < max_retries - 1:
-                    await asyncio.sleep(1.0)
-                else:
-                    logger.error(f"Call failed after {max_retries} retries: {e}")
-                    raise
+                return GenerationResult(
+                    parsed,
+                    tokens_in,
+                    tokens_cached,
+                    tokens_out,
+                    cost,
+                    provider=provider,
+                    model=model,
+                    fallback_used=fallback_used,
+                    fallback_reason=fallback_reason,
+                )
 
-        raise RuntimeError("Model call failed after all retries.")
+        if last_error:
+            raise last_error
+        raise RuntimeError(f"Model call failed on provider '{provider}' after all retries.")
 
     def _extract_json(self, text: str) -> Dict[str, Any]:
+        """Extract and parse valid JSON from model completion text, removing markdown fences."""
         text = text.strip()
         if text.startswith("```json"):
             text = text[7:]
@@ -196,12 +632,40 @@ class ModelClient:
         try:
             return json.loads(text)
         except json.JSONDecodeError:
-            # Fallback repair: find outermost braces
             start = text.find("{")
             end = text.rfind("}")
             if start != -1 and end != -1:
-                return json.loads(text[start : end + 1])
+                try:
+                    return json.loads(text[start : end + 1])
+                except json.JSONDecodeError:
+                    pass
             return {"raw": text}
+
+    def _validate_or_repair_schema(
+        self, parsed: Dict[str, Any], schema: Type[BaseModel], role: str, raw_text: str
+    ) -> Dict[str, Any]:
+        """Strictly validate model output against schema with controlled unwrapping repair."""
+        # 1. Direct validation
+        try:
+            return schema.model_validate(parsed).model_dump()
+        except Exception:
+            pass
+
+        # 2. Check common nesting wrappers models produce (e.g. {"output": {...}}, {"result": {...}})
+        if isinstance(parsed, dict):
+            for key in ["output", "data", "result", role, "response", "content"]:
+                if key in parsed and isinstance(parsed[key], dict):
+                    try:
+                        return schema.model_validate(parsed[key]).model_dump()
+                    except Exception:
+                        pass
+
+        # 3. If validation fails and cannot be repaired, raise ValueError rather than returning malformed data
+        try:
+            return schema.model_validate(parsed).model_dump()
+        except Exception as exc:
+            logger.error(f"Schema validation strictly failed for role '{role}': {exc}")
+            raise ValueError(f"Model response for role '{role}' failed schema validation: {exc}") from exc
 
     async def _mock_call(
         self,
@@ -210,18 +674,31 @@ class ModelClient:
         model: str,
         schema: Optional[Type[BaseModel]],
         context: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[Dict[str, Any], int, int, int, float]:
-        """Realistic mathematical simulation for reproducible local execution."""
-        await asyncio.sleep(random.uniform(0.08, 0.22))
+        provider: str = "meta",
+        fallback_used: bool = False,
+        fallback_reason: Optional[str] = None,
+    ) -> GenerationResult:
+        """Deterministic simulation for local testing and offline verification."""
         ctx = context or {}
-        problem = ctx.get("problem", "mathematical problem")
-        node_id = ctx.get("node_id", "NODE")
-        round_num = ctx.get("round", 1)
 
-        tokens_in = random.randint(450, 1200)
+        # Allow tests to simulate primary rate limit failure to test fallback
+        if ctx.get("simulate_meta_429") and provider == "meta":
+            raise RetryableProviderError("Simulated HTTP 429 Rate Limit on Meta Spark", status_code=429)
+
+        if ctx.get("simulate_meta_error") and provider == "meta":
+            raise RetryableProviderError("Simulated HTTP 500 Internal Server Error on Meta", status_code=500)
+
+        if ctx.get("simulate_auth_error") and provider == "meta":
+            raise NonRetryableProviderError("Simulated HTTP 401 Invalid Key on Meta", status_code=401)
+
+        await asyncio.sleep(random.uniform(0.01, 0.04))
+        problem = ctx.get("problem", "mathematical theorem")
+        node_id = ctx.get("node_id", "NODE")
+
+        tokens_in = random.randint(450, 1100)
         tokens_cached = int(tokens_in * random.uniform(0.6, 0.85))
-        tokens_out = random.randint(300, 750)
-        cost = self.compute_cost(model, tokens_in, tokens_cached, tokens_out)
+        tokens_out = random.randint(280, 680)
+        cost = self.compute_cost(model, tokens_in, tokens_cached, tokens_out, provider=provider)
 
         async with self.lock:
             self.cumulative_cost_usd += cost
@@ -230,11 +707,30 @@ class ModelClient:
             self.total_tokens_out += tokens_out
             self.total_calls += 1
 
+            if provider == "baseten":
+                self.cumulative_baseten_usd += cost
+                self.total_baseten_tokens_in += tokens_in
+                self.total_baseten_tokens_cached += tokens_cached
+                self.total_baseten_tokens_out += tokens_out
+            else:
+                self.cumulative_meta_usd += cost
+                self.total_meta_tokens_in += tokens_in
+                self.total_meta_tokens_cached += tokens_cached
+                self.total_meta_tokens_out += tokens_out
+
         output: Dict[str, Any] = {}
 
         if role == "explorer":
             output = {
-                "normalized_problem": f"Establish proof for: {problem[:80]}...",
+                "analysis": {
+                    "available_info": f"Problem target: {problem[:70]}... Constraints: n distinct elements, strict ordering.",
+                    "plan": "Construct dual monotonic length label map i -> (a_i, b_i) and derive injectivity via trichotomy.",
+                    "uncertainties": [
+                        "Boundary preservation at n=1 (sequence length 2)",
+                        "Symmetric extension when x_i > x_j",
+                    ],
+                },
+                "normalized_problem": f"Establish formal proof for: {problem[:80]}...",
                 "primary_route": f"Route via combinatorial pigeonhole principle on sequences with coordinate invariants (Candidate {node_id}).",
                 "backup_routes": [
                     "Induction on sequence length using extremal prefix argument",
@@ -254,7 +750,6 @@ class ModelClient:
             }
 
         elif role == "falsifier":
-            # Some falsifiers find repairable objections, rarely fatal
             severity_roll = random.random()
             if severity_roll > 0.8:
                 verdict = "needs_repair"
@@ -264,6 +759,7 @@ class ModelClient:
                         "severity": "major",
                         "claim": "poset chain partition assumes strict distinctness without explicit injection",
                         "repair": "Explicitly state hypothesis: all real numbers in sequence are distinct",
+                        "exact_quote": "distinct real numbers",
                     }
                 ]
             else:
@@ -272,7 +768,7 @@ class ModelClient:
 
             output = {
                 "verdict": verdict,
-                "assessment": f"Audited candidate {node_id}. Core inductive steps are sound. Boundary conditions verified.",
+                "assessment": f"Wonder 1.0 audited candidate {node_id}. Core inductive steps are sound. Boundary conditions verified.",
                 "weakest_lemmas": [f"Lemma L1_{node_id} (poset chain bounds)"],
                 "hidden_assumptions": ["Strict distinctness of input elements"],
                 "boundary_cases": ["Sequence of length 2 (n=1)", "Alternating sequences"],
@@ -285,6 +781,11 @@ class ModelClient:
         elif role == "aggregator":
             parents = ctx.get("parents", [])
             output = {
+                "analysis": {
+                    "available_info": f"Synthesizing {len(parents)} parent strategies with attached Wonder 1.0 falsifier critiques.",
+                    "plan": "Merge strongest invariants into a unified coordinate injection route while resolving preserved objections.",
+                    "uncertainties": ["Ensure all parent boundary objections are explicitly addressed."],
+                },
                 "normalized_problem": f"Synthesized research strategy for: {problem[:80]}",
                 "primary_route": f"Consolidated route merging strongest aspects of inputs ({', '.join(parents)}): Dilworth/Pigeonhole dual coordinates (t_i, s_i).",
                 "backup_routes": [
@@ -300,7 +801,7 @@ class ModelClient:
                 ],
                 "concrete_next_task": "Pass to readiness gate for structural audit.",
                 "readiness_assessment": "High confidence; ready for decomposition.",
-                "merged_objections_addressed": f"Addressed all objections from parents {parents}: incorporated explicit distinctness requirement.",
+                "preserved_critiques": ctx.get("preserved_critiques", []),
             }
 
         elif role == "gate":
@@ -312,7 +813,7 @@ class ModelClient:
                 "hidden_hard_steps": "None identified in primary route",
                 "unresolved_falsifier_objections": [],
                 "obligation_severity": "minor",
-                "explanation": "Strategy is concrete, uses standard validated machinery, and provides explicit subproblem targets.",
+                "explanation": "Wonder 1.0 evaluated the strategy: proof route is concrete, uses validated machinery, and provides explicit subproblem targets.",
             }
 
         elif role == "decomposer":
@@ -362,6 +863,7 @@ We present a rigorous combinatorial proof utilizing coordinate pair labeling.
         elif role == "solver":
             sec_idx = ctx.get("section_index", 1)
             retry_count = ctx.get("retry_count", 0)
+            rollout_num = ctx.get("rollout_num", 1)
 
             if sec_idx == 1:
                 body = (
@@ -372,14 +874,19 @@ We present a rigorous combinatorial proof utilizing coordinate pair labeling.
                     r"Since the single-element sequence $(x_i)$ is both trivially increasing and decreasing, we immediately have $a_i \ge 1$ and $b_i \ge 1$ for all $i$."
                 )
                 output = {
+                    "analysis": {
+                        "available_info": "Sequence of distinct real numbers S. Target: assign non-zero coordinate labels.",
+                        "plan": "Define length functions for increasing and decreasing chains terminating at index i.",
+                        "uncertainties": ["Ensure single-element base cases are well-defined."],
+                    },
                     "claimed_result": "Well-defined coordinate map i -> (a_i, b_i) with a_i, b_i >= 1.",
                     "solution_body": body,
                     "bridge_claims": ["Existence of finite longest sub-chains"],
                     "unproved_obligations": [],
                     "status": "solved",
+                    "rollout_index": rollout_num,
                 }
             elif sec_idx == 2:
-                # If retry_count == 0 and we want to demo section retry, we can simulate an initial conditional/retry
                 if ctx.get("force_retry", False) and retry_count == 0:
                     body = (
                         r"Consider distinct indices $i < j$. If $x_i < x_j$, then any increasing subsequence terminating at $x_i$ "
@@ -387,11 +894,17 @@ We present a rigorous combinatorial proof utilizing coordinate pair labeling.
                         r"Thus $a_j \ge a_i + 1$. [Note: argument for the case $x_i > x_j$ was omitted in this attempt]."
                     )
                     output = {
+                        "analysis": {
+                            "available_info": "Established definitions a_i, b_i from Section 1.",
+                            "plan": "Demonstrate that either a_j > a_i or b_j > b_i for any i < j.",
+                            "uncertainties": ["Decreasing order case requires separate branch."],
+                        },
                         "claimed_result": "Partial proof of injectivity (decreasing case missing).",
                         "solution_body": body,
                         "bridge_claims": ["Extension of chain"],
                         "unproved_obligations": ["Case x_i > x_j requires symmetric verification"],
                         "status": "partial",
+                        "rollout_index": rollout_num,
                     }
                 else:
                     body = (
@@ -403,11 +916,17 @@ We present a rigorous combinatorial proof utilizing coordinate pair labeling.
                         r"In either case, at least one coordinate strictly increases, which guarantees that $(a_i, b_i) \neq (a_j, b_j)$. Hence the mapping $i \mapsto (a_i, b_i)$ is strictly injective."
                     )
                     output = {
+                        "analysis": {
+                            "available_info": "Complete distinctness trichotomy x_i < x_j or x_i > x_j.",
+                            "plan": "Prove that either coordinate strictly increases, guaranteeing injectivity.",
+                            "uncertainties": [],
+                        },
                         "claimed_result": "Injective mapping i -> (a_i, b_i) for all distinct i, j.",
                         "solution_body": body,
                         "bridge_claims": ["Case trichotomy over distinct real numbers"],
                         "unproved_obligations": [],
                         "status": "solved",
+                        "rollout_index": rollout_num,
                     }
             else:
                 body = (
@@ -421,11 +940,17 @@ We present a rigorous combinatorial proof utilizing coordinate pair labeling.
                     r"This contradiction completes the proof: $S$ must contain at least one monotonic subsequence of length $n+1$."
                 )
                 output = {
+                    "analysis": {
+                        "available_info": "Injective coordinate map i -> (a_i, b_i) from Section 2; bound n^2+1 points.",
+                        "plan": "Assume length <= n contradiction; bound size of image by n^2; apply Pigeonhole Principle.",
+                        "uncertainties": [],
+                    },
                     "claimed_result": "Complete contradiction and conclusion of theorem.",
                     "solution_body": body,
                     "bridge_claims": ["Pigeonhole Principle over finite set of size n^2"],
                     "unproved_obligations": [],
                     "status": "solved",
+                    "rollout_index": rollout_num,
                 }
 
         elif role == "section_falsifier":
@@ -439,6 +964,7 @@ We present a rigorous combinatorial proof utilizing coordinate pair labeling.
                     ],
                     "assessment": "Fatal gap: proof cannot proceed without establishing injectivity in both order directions.",
                     "suggested_repair": "Supply symmetric argument for decreasing subsequences when x_i > x_j.",
+                    "exact_quote": "argument for the case $x_i > x_j$ was omitted",
                 }
             else:
                 output = {
@@ -446,13 +972,15 @@ We present a rigorous combinatorial proof utilizing coordinate pair labeling.
                     "fatal_objections": [],
                     "assessment": f"Section {sec_idx} proof is rigorous and completely satisfies its claimed target.",
                     "suggested_repair": "None needed.",
+                    "exact_quote": "",
                 }
 
         elif role == "global_verifier":
+            defects = ctx.get("simulated_defects", [])
             output = {
-                "verdict": "accepted",
-                "defects": [],
-                "summary": "All sections are mutually consistent, the dependency chain is sound, and the contradiction via pigeonhole principle is fully justified.",
+                "verdict": "rejected" if defects else "accepted",
+                "defects": defects,
+                "summary": "All sections are mutually consistent, the dependency chain is sound, and the contradiction via pigeonhole principle is fully justified." if not defects else "Defects detected during global review.",
                 "unresolved_objections_preserved": [],
             }
 
@@ -495,8 +1023,18 @@ We present a rigorous combinatorial proof utilizing coordinate pair labeling.
         if schema:
             try:
                 validated = schema.model_validate(output)
-                return validated.model_dump(), tokens_in, tokens_cached, tokens_out, cost
+                output = validated.model_dump()
             except Exception as e:
-                logger.warning(f"Mock validation fallback for {role}: {e}")
+                logger.warning(f"Mock validation notice for {role}: {e}")
 
-        return output, tokens_in, tokens_cached, tokens_out, cost
+        return GenerationResult(
+            output,
+            tokens_in,
+            tokens_cached,
+            tokens_out,
+            cost,
+            provider=provider,
+            model=model,
+            fallback_used=fallback_used,
+            fallback_reason=fallback_reason,
+        )

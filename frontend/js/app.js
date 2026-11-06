@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Mini-Colosseum Research Harness v2.0 Desktop Controller
  * Desktop proof workbench controller:
  * - Direct execution controls (Run All, Step, Pause, Stop, Re-explore)
@@ -406,13 +406,13 @@ class MiniColosseumApp {
       kEl.textContent = "Nothing here yet. Notes from your runs will appear here as they are made; nothing is added in advance.";
       return;
     }
-    let text = `=== UNREFUTED KNOWLEDGE DIRECTORY (${entries.length} entries | FR13) ===\n\n`;
+    let text = `=== REFERENCE NOTES (${entries.length} entries from this run) ===\n\n`;
     entries.forEach((e, idx) => {
       const type = (e.entry_type || "claim").toUpperCase();
       const status = e.status || "unverified";
       text += `[${idx + 1}] [${type}] ${status.toUpperCase()} - ${e.title || ""}\n`;
       if (e.contents) text += `    ${e.contents}\n`;
-      if (e.source_node) text += `    Source Node: ${e.source_node}\n`;
+      if (e.source) text += `    Source: ${e.source}\n`;
       text += "\n";
     });
     kEl.textContent = text;
@@ -596,7 +596,7 @@ class MiniColosseumApp {
     // Spark node, so summing nodes misattributes spend). Throttled poll.
     this.refreshBudgetFromServer();
 
-    const hardCap = parseFloat(document.getElementById("input-run-budget-cap")?.value || "7");
+    const hardCap = parseFloat(document.getElementById("input-run-budget-cap")?.value || "50");
     const sco = document.getElementById("status-cost");
     if (sco) sco.textContent = `SPEND: $${totalCost.toFixed(3)} / $${hardCap.toFixed(2)}`;
     const referenceSpend = document.getElementById("reference-spend");
@@ -620,7 +620,7 @@ class MiniColosseumApp {
         const tokK = Math.round(((pools.tokens_in || 0) + (pools.tokens_out || 0)) / 1000);
         const cachedK = Math.round((pools.tokens_cached || 0) / 1000);
         set("status-tokens", `${tokK}k tok (${cachedK}k cached)`);
-        const hardCap = parseFloat(document.getElementById("input-run-budget-cap")?.value || "7");
+        const hardCap = parseFloat(document.getElementById("input-run-budget-cap")?.value || "50");
         set("status-cost", `SPEND: $${pools.total_usage.toFixed(3)} / $${hardCap.toFixed(2)}`);
         set("reference-spend", `SPEND: $${pools.total_usage.toFixed(2)} / $${hardCap.toFixed(2)}`);
       })
@@ -715,7 +715,7 @@ class MiniColosseumApp {
     if (hypothesesEl) hypothesesEl.textContent = hypotheses;
 
     // 2. Format 4 Authentic Subgoals
-    if (subgoalsCountEl) subgoalsCountEl.textContent = `4 sections (Selected: ${label})`;
+    if (subgoalsCountEl) subgoalsCountEl.textContent = `Selected: ${label} (${node.type || "node"}, ${node.status || "pending"})`;
 
     const targetObligation = node.input_summary || out.target_claim || "Review the selected problem target.";
     if (tag1El) tag1El.textContent = "(1/4) Problem target";
@@ -792,7 +792,7 @@ class MiniColosseumApp {
     const outEl = document.getElementById("insp-output-content");
     if (outEl) {
       // Show the node's actual math first (claim + proof body), then raw JSON.
-      const bodyText = out.solution_body || out.latex_body || out.body || "";
+      const bodyText = out.solution_body || out.latex_body || out.proof_body || out.proof || out.body || "";
       const claimText = out.claimed_result || out.target_claim || "";
       let outText = "";
       if (claimText) outText += `Claim: ${claimText}\n\n`;
@@ -818,9 +818,33 @@ class MiniColosseumApp {
         if (out.preserved_critiques && out.preserved_critiques.length) {
           fText += `\nPreserved Parent Critiques:\n${JSON.stringify(out.preserved_critiques, null, 2)}\n`;
         }
+        if (node.rollouts && node.rollouts.length > 0) {
+          fText += `\nWriter drafts and their attached critiques (${node.rollouts.length}):\n`;
+          node.rollouts.forEach((draft, di) => {
+            const crit = draft.falsifier_critique || {};
+            fText += `\n--- Draft ${di + 1} ---\nCritique verdict: ${crit.verdict || "not recorded"}\n`;
+            if (crit.assessment) fText += `Assessment: ${crit.assessment}\n`;
+            (crit.objections || []).forEach((o) => {
+              fText += `- [${o.severity || "major"}] ${o.claim_attacked || o.claim || ""}: ${o.why || ""}\n`;
+            });
+          });
+        }
         fEl.textContent = fText;
       } else {
-        fEl.textContent = "No review is available for this section.";
+        if (node.rollouts && node.rollouts.length > 0) {
+          let fText = `Writer drafts and their attached critiques (${node.rollouts.length}):\n`;
+          node.rollouts.forEach((draft, di) => {
+            const crit = draft.falsifier_critique || {};
+            fText += `\n--- Draft ${di + 1} ---\nCritique verdict: ${crit.verdict || "not recorded"}\n`;
+            if (crit.assessment) fText += `Assessment: ${crit.assessment}\n`;
+            (crit.objections || []).forEach((o) => {
+              fText += `- [${o.severity || "major"}] ${o.claim_attacked || o.claim || ""}: ${o.why || ""}\n`;
+            });
+          });
+          fEl.textContent = fText;
+        } else {
+          fEl.textContent = "No review is available for this section.";
+        }
       }
     }
 
@@ -829,7 +853,7 @@ class MiniColosseumApp {
       const verifNode = this.currentRunData.nodes.find((n) => n.type === "global_verifier");
       if (verifNode && verifNode.output) {
         const v = verifNode.output;
-        let vHtml = `<div style="font-weight:bold; margin-bottom:6px; color:#005500;">Verdict: ${v.verdict.toUpperCase()} (Confidence: ${v.confidence})</div>`;
+        let vHtml = `<div style="font-weight:bold; margin-bottom:6px; color:#005500;">Verdict: ${(v.verdict || "unknown").toUpperCase()}${v.exact_quotes_checked !== undefined ? ` (Exact quotes passed: ${v.exact_quotes_passed || 0}/${v.exact_quotes_checked})` : ""}</div>`;
         vHtml += `<div style="margin-bottom:8px;">${v.summary || ""}</div>`;
 
         const defects = v.defects || [];
@@ -845,10 +869,10 @@ class MiniColosseumApp {
 
             vHtml += `
               <div style="border:1px solid #c8c6bc; background:#ffffff; padding:6px; margin-bottom:6px;">
-                <span style="${badgeClass} font-weight:bold;">${badgeLabel}</span> (Section: ${escapeHTML(String(d.section_id || d.section || "Global"))})<br>
+                <span style="${badgeClass} font-weight:bold;">${badgeLabel}</span> (Section: ${escapeHTML(String(d.section_index ?? d.section_id ?? d.section ?? "Global"))})<br>
                 <strong>Description:</strong> ${escapeHTML(d.description || d.claim || "")}<br>
                 <strong>Exact Quote:</strong> <code>"${escapeHTML(d.exact_quote || "N/A")}"</code><br>
-                ${d.suggested_repair ? `<strong>Suggested Repair:</strong> ${escapeHTML(d.suggested_repair)}` : ""}
+                ${(d.suggested_action || d.suggested_repair) ? `<strong>Suggested Repair:</strong> ${escapeHTML(d.suggested_action || d.suggested_repair)}` : ""}
               </div>
             `;
           });
@@ -873,7 +897,8 @@ class MiniColosseumApp {
       }
 
       const hmedRecords = this.currentRunData.hmed_records || [];
-      const nodeHmed = hmedRecords.filter((r) => r.subproblem_index === (out.section_index || 0) || r.subproblem_index === 2);
+      const secIdx = out.section_index || parseInt(String(node.id || "").replace(/\D+/g, ""), 10) || 0;
+      const nodeHmed = hmedRecords.filter((r) => r.subproblem_index === secIdx);
       if (nodeHmed.length > 0) {
         hHtml += `<strong>Revision records (${nodeHmed.length}):</strong><br>`;
         nodeHmed.forEach((rec, idx) => {
@@ -881,8 +906,10 @@ class MiniColosseumApp {
             <div style="border:1px solid #c8c6bc; background:#f4f3ec; padding:6px; margin-top:6px; font-size:10.5px;">
               <strong>Revision ${idx + 1} (Subproblem ${escapeHTML(String(rec.subproblem_index || ""))}):</strong><br>
               <strong>Critique:</strong> ${escapeHTML(rec.critique || "")}<br>
-              <strong>Revision Changes:</strong> ${escapeHTML(rec.changes_made || "")}<br>
-              <strong>Prior Fatal Objections:</strong> ${escapeHTML(JSON.stringify(rec.prior_fatal_objections || []))}
+              <strong>Failed draft:</strong> ${escapeHTML(String(rec.failed_draft || "").substring(0, 400))}<br>
+              <strong>Revised draft:</strong> ${escapeHTML(String(rec.revised_draft || "").substring(0, 400))}<br>
+              <strong>Downstream verdict:</strong> ${escapeHTML(rec.downstream_verdict || "")}<br>
+              <strong>Cost:</strong> $${(rec.cost_usd || 0).toFixed(4)} (solver ${escapeHTML(rec.model_solver || "")} / reviewer ${escapeHTML(rec.model_falsifier || "")})
             </div>
           `;
         });
@@ -956,7 +983,12 @@ class MiniColosseumApp {
       container.appendChild(proofEl);
     }
     const latex = (this.currentRunData.assembled_latex || "").trim();
-    proofEl.textContent = latex || "Proof text will appear here as sections are solved.";
+    if (latex) {
+      const secNodes = this.currentRunData.nodes.filter((n) => n.type === "solver" || n.stage === "solving");
+      proofEl.innerHTML = SimpleLaTeXRenderer.renderDocument(latex, secNodes, []);
+    } else {
+      proofEl.textContent = "Proof text will appear here as sections are solved.";
+    }
   }
 
   appendLogEntry(timestamp, stage, severity, text, nodeId = null) {
@@ -1012,13 +1044,13 @@ class MiniColosseumApp {
   async handleRunAll() {
     const statement = document.getElementById("input-problem")?.value || document.getElementById("toolbar-problem-title")?.value || "";
     this.updatePreviewProblem();
-    const hardCap = parseFloat(document.getElementById("input-run-budget-cap")?.value || "7");
+    const hardCap = parseFloat(document.getElementById("input-run-budget-cap")?.value || "50");
     if (!statement.trim() && this.attachments.length === 0) {
       alert("Enter a problem statement or attach a document.");
       this.showModal("modal-run-setup");
       return;
     }
-    if (!Number.isFinite(hardCap) || hardCap < 0.5 || hardCap % 0.5 !== 0) {
+    if (!Number.isFinite(hardCap) || hardCap < 0.5) {
       alert("Budget cap must be at least $0.50 in $0.50 increments.");
       this.showModal("modal-run-setup");
       return;
@@ -1050,6 +1082,13 @@ class MiniColosseumApp {
           body: JSON.stringify({
             problem_statement: statement,
             budget_cap_usd: hardCap,
+            max_rounds: Math.max(1, Math.min(20, parseInt(document.getElementById("input-max-rounds")?.value || "15", 10) || 15)),
+            tree_widths: (document.getElementById("input-tree-widths")?.value || "12, 8, 4, 1")
+              .split(",")
+              .map((s) => parseInt(s.trim(), 10))
+              .filter((n) => Number.isFinite(n) && n > 0),
+            k_sample: Math.max(2, Math.min(8, parseInt(document.getElementById("input-k-sample")?.value || "4", 10) || 4)),
+            k_rollouts: Math.max(2, Math.min(8, parseInt(document.getElementById("input-k-sample")?.value || "4", 10) || 4)),
             cross_model_review: true,
             attachments,
           }),
@@ -1290,6 +1329,7 @@ class MiniColosseumApp {
             <div><em>${escapeHTML((r.problem || "").substring(0, 75))}...</em></div>
             <div style="font-size: 10px; color: #666;">Date: ${escapeHTML(r.created_at || "")} | Cost: $${(r.cost_usd || 0).toFixed(4)} | Meta: $${(r.cost_meta_usd || 0).toFixed(4)} | Baseten: $${(r.cost_baseten_usd || 0).toFixed(4)}</div>
             <button class="btn-tool" style="margin-top: 4px;" onclick="event.stopPropagation(); window.app.deleteRun('${escapeHTML(r.run_id)}')">Delete</button>
+            ${["cancelled", "unresolved", "failed"].includes((r.status || "").toLowerCase()) ? '<button class="btn-tool" style="margin-top: 4px;" onclick="event.stopPropagation(); window.app.continueRun(\'' + escapeHTML(r.run_id) + '\', ' + (r.cost_usd || 0) + ')">Continue</button>' : ""}
           </div>
         `
           )
@@ -1314,6 +1354,33 @@ class MiniColosseumApp {
       await this.openRunHistoryModal();
     } catch (e) {
       alert(`Failed to delete run: ${e.message || e}`);
+    }
+  }
+
+  async continueRun(runId, priorCost) {
+    const capInput = prompt(
+      `Continue run ${runId}? Already-written sections are reused; only the missing sections are solved, then the proof is verified.\n\nPrior spend: $${(priorCost || 0).toFixed(2)} (counts toward the cap).\nEnter the TOTAL budget cap in USD for this run:`,
+      ((priorCost || 0) + 10).toFixed(2)
+    );
+    if (capInput === null) return;
+    const budgetCap = parseFloat(capInput);
+    if (!budgetCap || budgetCap <= (priorCost || 0)) {
+      alert("Budget cap must be a number greater than the prior spend.");
+      return;
+    }
+    try {
+      const res = await fetch(`/api/runs/${runId}/continue`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ budget_cap_usd: budgetCap }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || `Continue failed (${res.status})`);
+      this.currentRunId = runId;
+      this.closeModals();
+      alert(`Continuing run ${runId}: reusing sections [${(data.reused_sections || []).join(", ")}], solving sections [${(data.missing_sections || []).join(", ")}].`);
+    } catch (e) {
+      alert(`Failed to continue run: ${e.message || e}`);
     }
   }
 
@@ -1714,7 +1781,8 @@ class MiniColosseumApp {
       window.graphRenderer.render(replayData.nodes, replayData.edges);
     }
     // Update proof pane
-    this.updateProofPane(replayData);
+    this.renderDocument();
+    this.updatePreviewProof();
   }
 
   async quit() {

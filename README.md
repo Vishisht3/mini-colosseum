@@ -1,4 +1,4 @@
-﻿# Mini-Colosseum
+# Mini-Colosseum
 
 Mini-Colosseum is a local research workbench for running a multi-stage inference pipeline against Meta models, with optional Baseten and Fireworks providers that fall back to Meta on any failure and a desktop/browser UI for interactive runs, exports, and replay.
 
@@ -30,13 +30,15 @@ The project has four main layers:
 
 4. **Research/pipeline engine**
    - Main orchestration and lifecycle: [backend/pipeline/orchestrator.py](backend/pipeline/orchestrator.py)
-   - Stages include exploration, gate checking, decomposition, solving, verification, and curation:
+   - Stages and utilities include exploration, gate checking, decomposition, solving, verification, curation, continuation, and LaTeX canonicalization:
      - [backend/pipeline/exploration.py](backend/pipeline/exploration.py)
      - [backend/pipeline/gate.py](backend/pipeline/gate.py)
      - [backend/pipeline/decomposition.py](backend/pipeline/decomposition.py)
      - [backend/pipeline/solving.py](backend/pipeline/solving.py)
      - [backend/pipeline/verification.py](backend/pipeline/verification.py)
      - [backend/pipeline/curator.py](backend/pipeline/curator.py)
+     - [backend/pipeline/continuation.py](backend/pipeline/continuation.py)
+     - [backend/pipeline/latex_utils.py](backend/pipeline/latex_utils.py)
 
 ### Runtime flow
 
@@ -56,7 +58,6 @@ The project has four main layers:
 - [frontend](frontend): static HTML/CSS/JS for the web UI
 - [electron](electron): Electron shell for packaged desktop usage
 - [docs](docs): architecture diagram and project documentation assets
-- [tests](tests): backend provider/fallback tests
 - [run.bat](run.bat): Windows one-click launcher
 - [run.sh](run.sh): POSIX launcher for macOS/Linux
 - [package.json](package.json): Node scripts and Electron packaging config
@@ -102,16 +103,6 @@ When you first launch Mini-Colosseum, the onboarding modal prompts for API crede
 
 Muse Wonder always stays on Meta. Baseten and Fireworks are never used for Wonder calls, and Meta never falls back to Baseten or Fireworks: Meta is the only fallback target.
 
-## Running tests
-
-```bash
-# Backend provider/fallback tests
-python -m pytest
-
-# Frontend state reducer unit tests
-node frontend/js/reducer.test.js
-```
-
 ## Problem input and output
 
 The app accepts human-readable problem statements and can ingest plain text, Markdown, LaTeX, and PDF/DOC/DOCX/TEX attachments. Runs also support replay of prior execution history, export of proofs/reports/CSV ledgers/JSON traces, and budget-aware stopping based on configured caps.
@@ -119,12 +110,3 @@ The app accepts human-readable problem statements and can ingest plain text, Mar
 ## Security model
 
 Mini-Colosseum keeps local execution constrained to loopback interfaces and validates a per-launch session token for app traffic. This protects the local UI and backend from cross-origin or external misuse while still allowing the browser or Electron app to connect to the same machine.
-
-## Notes for contributors
-
-- The pipeline uses fixed internal sampling and rollout constants, which are intentionally not exposed as user-facing runtime settings.
-- Provider routing is explicit and model-aware; output tokens and reasoning parameters are capped and normalized per role.
-- The project expects the backend and frontend to run in a local, loopback-only environment rather than as a public multi-user service.
-
-
-

@@ -26,6 +26,8 @@ function reduceReplayEvents(events) {
       if (existing) Object.assign(existing, payload.node || payload.updates || {});
     } else if (evt.event_type === "knowledge_entry_added" || payload.type === "knowledge_entry_added") {
       if (payload.entry) replayData.knowledge_directory.push(payload.entry);
+    } else if (evt.event_type === "run_finished" || payload.type === "run_finished") {
+      if (payload.assembled_latex) replayData.assembled_latex = payload.assembled_latex;
     }
   }
 

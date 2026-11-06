@@ -16,6 +16,9 @@ def get_default_data_dir() -> str:
     env_dir = os.environ.get("MINI_COLOSSEUM_DATA_DIR")
     if env_dir:
         return env_dir
+    if "pytest" in sys.modules:
+        import tempfile
+        return os.path.join(tempfile.gettempdir(), "mini_colosseum_test_data")
     if sys.platform == "win32":
         app_data = os.environ.get("APPDATA") or os.path.expanduser("~\\AppData\\Roaming")
         return os.path.join(app_data, "Mini-Colosseum")
@@ -311,6 +314,45 @@ class RunStore:
                 run_id,
             ))
             conn.commit()
+        finally:
+            conn.close()
+
+    def reopen_run(self, run_id: str) -> bool:
+        """Move a finished run back to running so it can be continued in place."""
+        conn = sqlite3.connect(self.db_path)
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE runs SET status = 'running', finished_at = NULL WHERE run_id = ?",
+                (run_id,),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            conn.close()
+
+    def get_max_event_seq(self, run_id: str) -> int:
+        conn = sqlite3.connect(self.db_path)
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COALESCE(MAX(seq), 0) FROM events WHERE run_id = ?", (run_id,))
+            return int(cursor.fetchone()[0] or 0)
+        finally:
+            conn.close()
+
+    def reset_running_nodes(self, run_id: str) -> int:
+        """Nodes still 'running' when a run ends were interrupted, not
+        completed: return them to pending so saved traces do not claim
+        work is still in flight."""
+        conn = sqlite3.connect(self.db_path)
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE nodes SET status = 'pending' WHERE run_id = ? AND status = 'running'",
+                (run_id,),
+            )
+            conn.commit()
+            return cursor.rowcount
         finally:
             conn.close()
 

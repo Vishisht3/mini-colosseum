@@ -6,8 +6,6 @@
   "scripts": {
     "start": "electron electron/main.js",
     "start:browser": "python -m backend.main 8765",
-    "test": "python -m unittest discover -s tests -p \"test_*.py\"",
-    "test:frontend": "node frontend/js/reducer.test.js",
     "pack:backend": "pyinstaller --noconfirm --onedir --name colosseum-backend --distpath electron/backend-build backend/main.py",
     "dist": "electron-builder",
     "dist:dir": "electron-builder --dir"

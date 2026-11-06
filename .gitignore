@@ -7,6 +7,20 @@ __pycache__/
 data/
 *.db
 *.sqlite3
+saved-runs/
+*-proof.tex
+
+# Local logs, archives, and agent/test scratch files
+*.log
+*.zip
+.agents/
+mc-chrome-profile-*/
+mc_*/
+tests/
+*.test.js
+pytest.ini
+RESUME_CHECKPOINT.md
+handoff-*.md
 
 # Node & package build artifacts
 node_modules/

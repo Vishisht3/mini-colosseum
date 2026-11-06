@@ -16,7 +16,7 @@ Returns one of four verdicts:
 
 import time
 from typing import Dict, Any, Callable, Awaitable, Tuple
-from ..models import Node, Event
+from ..models import Node, Event, GateDecision
 from ..client import ModelClient
 
 
@@ -107,6 +107,7 @@ class ReadinessGateEngine:
             role="gate",
             prompt=prompt,
             model=model_gate,
+            schema=GateDecision,
             stable_prefix=knowledge_prefix,
             reasoning_effort="high",
             context_hints={"problem": problem, "node_id": gate_node_id, "round": round_num},
@@ -166,7 +167,7 @@ class ReadinessGateEngine:
                 payload={
                     "stage": "gate",
                     "severity": "info" if gate_node.status == "accepted" else "warning",
-                    "text": f"Readiness Gate verdict: {verdict}. {out.get('explanation', '')}",
+                    "text": f"Readiness Gate verdict: {verdict}. {out.get('rationale') or out.get('explanation', '')}",
                     "node_id": gate_node.id,
                 },
             )

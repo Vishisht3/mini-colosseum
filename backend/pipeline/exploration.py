@@ -199,7 +199,7 @@ class ExplorationEngine:
             node.tokens_out += f_out_tok
             node.cost_usd += f_cost
             node.falsifier_report = f_out
-            node.objections = f_out.get("categorized_objections", [])
+            node.objections = f_out.get("categorized_objections") or f_out.get("objections", [])
             node.finished_at = time.strftime("%Y-%m-%d %H:%M:%S")
 
             verdict = f_out.get("verdict", "survives")
@@ -384,7 +384,7 @@ class ExplorationEngine:
                 agg_node.fallback_used = getattr(call_res, "fallback_used", False)
                 agg_node.fallback_reason = getattr(call_res, "fallback_reason", None)
                 agg_node.falsifier_report = f_out
-                agg_node.objections = f_out.get("categorized_objections", [])
+                agg_node.objections = f_out.get("categorized_objections") or f_out.get("objections", [])
                 agg_node.tokens_in = t_in + f_in
                 agg_node.tokens_cached = t_cached + f_cached
                 agg_node.tokens_out = t_out + f_out_tok

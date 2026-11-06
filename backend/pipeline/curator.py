@@ -66,7 +66,11 @@ class CuratorEngine:
         f_rep = strategy_node.falsifier_report or {}
         if f_rep.get("verdict") in ("reject", "falsified", "needs_repair"):
             objs = f_rep.get("categorized_objections") or f_rep.get("objections") or []
-            obj_claim = objs[0].get("claim", "") if (objs and isinstance(objs[0], dict)) else str(objs[:1])
+            obj_claim = (
+                (objs[0].get("claim_attacked") or objs[0].get("claim") or objs[0].get("why") or "")
+                if (objs and isinstance(objs[0], dict))
+                else str(objs[:1])
+            )
             entries.append(
                 KnowledgeEntry(
                     entry_type="failed_approaches",
@@ -77,6 +81,31 @@ class CuratorEngine:
                 )
             )
 
+        if falsifier_node and falsifier_node.output:
+            fn_out = falsifier_node.output
+            rationale = fn_out.get("rationale") or fn_out.get("explanation") or fn_out.get("summary") or ""
+            blocking = fn_out.get("blocking_issues") or []
+            if rationale or blocking:
+                entries.append(
+                    KnowledgeEntry(
+                        entry_type="failed_approaches",
+                        title=f"Gate/Verifier Audit in {falsifier_node.id}",
+                        contents=f"{rationale} Blocking: {'; '.join(str(b) for b in blocking)}".strip(),
+                        source=falsifier_node.id,
+                        caveats="Must be resolved in subsequent exploration round.",
+                    )
+                )
+        first_obstruction = strat_out.get("first_hard_obstruction")
+        if first_obstruction:
+            entries.append(
+                KnowledgeEntry(
+                    entry_type="observations",
+                    title=f"Hard Obstruction (Round {round_num})",
+                    contents=str(first_obstruction),
+                    source=strategy_node.id,
+                    caveats="Identified bottleneck from strategy synthesis.",
+                )
+            )
         if rejected_nodes:
             for rn in rejected_nodes:
                 r_out = rn.output or {}

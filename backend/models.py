@@ -146,10 +146,11 @@ class Objection(BaseModel):
     cheap_test: str = ""
     quote_verified: bool = True
 
-
     @model_validator(mode="before")
     @classmethod
     def _coerce_severity(cls, data: Any) -> Any:
+        if isinstance(data, str):
+            return {"claim_attacked": data, "why": data, "severity": "major"}
         if isinstance(data, dict):
             data = dict(data)
             _norm_enum(data, "severity", _SEVERITY_MAP)
@@ -185,20 +186,41 @@ class FalsifierReport(BaseModel):
                     data[field] = [data[field]]
                 elif isinstance(data.get(field), (list, tuple)):
                     data[field] = [
-                        item if isinstance(item, dict) else {"claim": _as_text(item)}
+                        item.model_dump() if isinstance(item, BaseModel) else (item if isinstance(item, dict) else {"claim": _as_text(item)})
                         for item in data[field]
                     ]
             _norm_enum(data, "verdict", {
-                "survives": "survives", "survive": "survives", "pass": "survives", "accepted": "survives",
+                "survives": "survives", "survive": "survives", "pass": "survives", "passed": "survives", "accepted": "survives", "accept": "survives", "ready": "survives", "valid": "survives",
                 "needs_repair": "needs_repair", "repair": "needs_repair",
                 "reject": "reject", "rejected": "reject", "fail": "reject",
                 "falsified": "falsified", "false": "falsified",
             })
             if "assessment" in data:
                 data["assessment"] = _as_text(data["assessment"])
-            for field in ("unresolved_to_preserve", "minimal_weakenings", "dropped_objections", "weakest_lemmas", "hidden_assumptions", "boundary_cases", "theorem_misuse", "decisive_tests", "unresolved_objections"):
+            for field in (
+                "unresolved_to_preserve",
+                "minimal_weakenings",
+                "dropped_objections",
+                "weakest_lemmas",
+                "hidden_assumptions",
+                "boundary_cases",
+                "theorem_misuse",
+                "decisive_tests",
+                "unresolved_objections",
+            ):
                 if field in data:
                     data[field] = _as_text_list(data[field])
+            if data.get("objections") and not data.get("categorized_objections"):
+                data["categorized_objections"] = [
+                    item if isinstance(item, dict) else (item.model_dump() if hasattr(item, "model_dump") else {"claim": _as_text(item)})
+                    for item in data["objections"]
+                ]
+            elif data.get("categorized_objections") and not data.get("objections"):
+                data["objections"] = list(data["categorized_objections"])
+            if data.get("unresolved_to_preserve") and not data.get("unresolved_objections"):
+                data["unresolved_objections"] = list(data["unresolved_to_preserve"])
+            elif data.get("unresolved_objections") and not data.get("unresolved_to_preserve"):
+                data["unresolved_to_preserve"] = list(data["unresolved_objections"])
         return data
 
 
@@ -258,13 +280,18 @@ class GateObligation(BaseModel):
     severity: Literal["minor", "major"] = "minor"
     assigned_section: Optional[int] = None
 
-
     @model_validator(mode="before")
     @classmethod
     def _coerce_severity(cls, data: Any) -> Any:
+        if isinstance(data, str):
+            return {"id": data, "severity": "minor"}
         if isinstance(data, dict):
             data = dict(data)
-            _norm_enum(data, "severity", _SEVERITY_MAP)
+            if not data.get("id"):
+                data["id"] = _as_text(
+                    data.get("description") or data.get("obligation") or data.get("claim") or "obligation"
+                )
+            _norm_enum(data, "severity", {"fatal": "major", "major": "major", "minor": "minor", "high": "major", "low": "minor"})
         return data
 
 
@@ -274,6 +301,7 @@ class GateDecision(BaseModel):
     blocking_issues: List[str] = Field(default_factory=list)
     obligations: List[GateObligation] = Field(default_factory=list)
     rationale: str = ""
+    explanation: str = ""
 
     @model_validator(mode="before")
     @classmethod
@@ -290,6 +318,12 @@ class GateDecision(BaseModel):
                 data["blocking_issues"] = _as_text_list(data["blocking_issues"])
             if "rationale" in data:
                 data["rationale"] = _as_text(data["rationale"])
+            if "explanation" in data:
+                data["explanation"] = _as_text(data["explanation"])
+            if data.get("rationale") and not data.get("explanation"):
+                data["explanation"] = data["rationale"]
+            elif data.get("explanation") and not data.get("rationale"):
+                data["rationale"] = data["explanation"]
         return data
 
 
@@ -297,6 +331,7 @@ class SectionSolution(BaseModel):
     """Appendix A: Section solution output schema."""
     status: Literal["solved", "partial", "blocked"] = "solved"
     latex_body: str = ""
+    solution_body: str = ""
     claimed_result: str = ""
     bridge_claims: List[str] = Field(default_factory=list)
     open_obligations: List[str] = Field(default_factory=list)
@@ -312,9 +347,13 @@ class SectionSolution(BaseModel):
                 "partial": "partial", "partially_solved": "partial",
                 "blocked": "blocked", "failed": "blocked", "reject": "blocked", "rejected": "blocked",
             })
-            for field in ("latex_body", "claimed_result"):
+            for field in ("latex_body", "solution_body", "claimed_result"):
                 if field in data:
                     data[field] = _as_text(data[field])
+            if data.get("solution_body") and not data.get("latex_body"):
+                data["latex_body"] = data["solution_body"]
+            elif data.get("latex_body") and not data.get("solution_body"):
+                data["solution_body"] = data["latex_body"]
             for field in ("bridge_claims", "open_obligations"):
                 if field in data:
                     data[field] = _as_text_list(data[field])
@@ -326,6 +365,8 @@ class SectionReview(BaseModel):
     verdict: Literal["ready", "conditional", "rejected"] = "ready"
     fatal_objections: List[Union[str, Dict[str, Any]]] = Field(default_factory=list)
     claims_not_established: List[str] = Field(default_factory=list)
+    minor_suggestions: List[str] = Field(default_factory=list)
+    summary: str = ""
 
     @model_validator(mode="before")
     @classmethod
@@ -339,6 +380,10 @@ class SectionReview(BaseModel):
             })
             if "claims_not_established" in data:
                 data["claims_not_established"] = _as_text_list(data["claims_not_established"])
+            if "minor_suggestions" in data:
+                data["minor_suggestions"] = _as_text_list(data["minor_suggestions"])
+            if "summary" in data:
+                data["summary"] = _as_text(data["summary"])
             if isinstance(data.get("fatal_objections"), str):
                 data["fatal_objections"] = [data["fatal_objections"]]
         return data
@@ -358,7 +403,6 @@ class GlobalVerdict(BaseModel):
     verdict: Literal["accept", "reject", "accepted", "rejected"] = "accept"
     defects: List[Union[GlobalDefect, Dict[str, Any]]] = Field(default_factory=list)
     next_action: Literal["revise", "re_explore", "accept"] = "accept"
-
 
     @model_validator(mode="before")
     @classmethod
@@ -432,31 +476,75 @@ class SectionPlan(BaseModel):
             if raw_items is None and isinstance(data.get("subproblems"), (list, tuple)):
                 raw_items = list(data["subproblems"])
             if raw_items is not None:
-                items = []
-                for pos, item in enumerate(raw_items, start=1):
-                    if isinstance(item, str):
+                # First pass: normalize each item into a dict and inspect raw indices
+                norm_items: List[Dict[str, Any]] = []
+                raw_indices: List[Optional[int]] = []
+                for item in raw_items:
+                    if isinstance(item, BaseModel):
+                        item = item.model_dump()
+                    elif isinstance(item, str):
                         item = {"title": item, "target_claim": item}
-                    if isinstance(item, dict):
+                    elif isinstance(item, dict):
                         item = dict(item)
-                        index = item.get("index") or pos
-                        item["index"] = index
-                        if not item.get("id"):
-                            item["id"] = f"SEC_{index}"
-                        if not item.get("title"):
-                            item["title"] = item.get("name") or item.get("section") or f"Section {index}"
-                        if not item.get("target_claim"):
-                            item["target_claim"] = item.get("claim") or item.get("target") or item.get("goal") or item.get("description") or item.get("title")
-                        deps = item.get("dependencies")
-                        if isinstance(deps, (int, str)):
-                            deps = [deps]
-                        if isinstance(deps, (list, tuple)):
-                            coerced = []
-                            for d in deps:
-                                try:
-                                    coerced.append(int(d))
-                                except (TypeError, ValueError):
-                                    pass
-                            item["dependencies"] = coerced
+                    else:
+                        item = {"title": _as_text(item), "target_claim": _as_text(item)}
+                    raw_idx = item.get("index")
+                    parsed_idx: Optional[int] = None
+                    if raw_idx is not None and not isinstance(raw_idx, bool):
+                        try:
+                            parsed_idx = int(raw_idx)
+                        except (TypeError, ValueError):
+                            parsed_idx = None
+                    raw_indices.append(parsed_idx)
+                    norm_items.append(item)
+
+                # Detect 0-based indexing or duplicate/missing indices and map cleanly to 1..N
+                old_to_new: Dict[int, int] = {}
+                for pos, r_idx in enumerate(raw_indices, start=1):
+                    if r_idx is not None and r_idx not in old_to_new:
+                        old_to_new[r_idx] = pos
+
+                has_zero_index = any(r_idx == 0 for r_idx in raw_indices)
+                has_invalid_or_dup = (
+                    len(set(r for r in raw_indices if r is not None)) != len(norm_items)
+                    or any(r is None or r <= 0 for r in raw_indices)
+                )
+
+                items = []
+                for pos, item in enumerate(norm_items, start=1):
+                    r_idx = raw_indices[pos - 1]
+                    if has_zero_index or has_invalid_or_dup or r_idx is None:
+                        index = pos
+                    else:
+                        index = r_idx
+                    item["index"] = index
+                    if not item.get("id"):
+                        item["id"] = f"SEC_{index}"
+                    if not item.get("title"):
+                        item["title"] = item.get("name") or item.get("section") or f"Section {index}"
+                    if not item.get("target_claim"):
+                        item["target_claim"] = (
+                            item.get("claim")
+                            or item.get("target")
+                            or item.get("goal")
+                            or item.get("description")
+                            or item.get("title")
+                        )
+                    deps = item.get("dependencies")
+                    if isinstance(deps, (int, str)):
+                        deps = [deps]
+                    if isinstance(deps, (list, tuple)):
+                        coerced = []
+                        for d in deps:
+                            try:
+                                d_int = int(d)
+                                if (has_zero_index or has_invalid_or_dup) and d_int in old_to_new:
+                                    d_int = old_to_new[d_int]
+                                if 1 <= d_int <= len(norm_items) and d_int != index and d_int not in coerced:
+                                    coerced.append(d_int)
+                            except (TypeError, ValueError):
+                                pass
+                        item["dependencies"] = coerced
                     items.append(item)
                 data["subproblems"] = items
             if "latex_skeleton" in data:
@@ -477,13 +565,21 @@ class Defect(BaseModel):
     quote_verified: bool = True
     downgraded_warning: bool = False
 
-
     @model_validator(mode="before")
     @classmethod
     def _coerce_severity(cls, data: Any) -> Any:
+        if isinstance(data, str):
+            return {"description": data, "severity": "major"}
         if isinstance(data, dict):
             data = dict(data)
             _norm_enum(data, "severity", _SEVERITY_MAP)
+            if data.get("section_index") is None and data.get("section") is not None:
+                try:
+                    data["section_index"] = int(data["section"])
+                except (TypeError, ValueError):
+                    pass
+            if not data.get("exact_quote") and data.get("quote"):
+                data["exact_quote"] = _as_text(data["quote"])
         return data
 
 
@@ -493,12 +589,20 @@ class VerificationReport(BaseModel):
     downgraded_warnings: List[Defect] = Field(default_factory=list)
     summary: str = ""
     unresolved_objections_preserved: List[str] = Field(default_factory=list)
+    exact_quotes_checked: int = 0
+    exact_quotes_passed: int = 0
 
     @model_validator(mode="before")
     @classmethod
     def _coerce_fields(cls, data: Any) -> Any:
         if isinstance(data, dict):
             data = dict(data)
+            for _f in ("defects", "downgraded_warnings"):
+                if isinstance(data.get(_f), (list, tuple)):
+                    data[_f] = [
+                        item.model_dump() if isinstance(item, BaseModel) else (item if isinstance(item, dict) else {"description": _as_text(item)})
+                        for item in data[_f]
+                    ]
             for field in ("defects", "downgraded_warnings"):
                 if isinstance(data.get(field), str):
                     data[field] = [{"description": data[field]}]
@@ -514,8 +618,6 @@ class VerificationReport(BaseModel):
             if "unresolved_objections_preserved" in data:
                 data["unresolved_objections_preserved"] = _as_text_list(data["unresolved_objections_preserved"])
         return data
-    exact_quotes_checked: int = 0
-    exact_quotes_passed: int = 0
 
 
 class Node(BaseModel):
@@ -609,7 +711,7 @@ class KnowledgeDirectory(BaseModel):
 class RunConfig(BaseModel):
     run_id: str = Field(default_factory=lambda: str(uuid.uuid4())[:8])
     problem_statement: str
-    tree_widths: List[int] = Field(default_factory=lambda: [9, 6, 3, 1])
+    tree_widths: List[int] = Field(default_factory=lambda: [12, 8, 4, 1])
     k_sample: int = 4
     k_rollouts: int = 4  # Test-time scaling K rollouts per section
     cross_model_review: bool = True  # Spark Open vs Wonder 1.0
@@ -626,10 +728,11 @@ class RunConfig(BaseModel):
             "curator": "muse-spark-1.3",
         }
     )
-    budget_cap_usd: float = 7.0
+    budget_cap_usd: float = 50.0
     budget_cap_meta_usd: float = 150.0  # Meta Model API pool
     budget_cap_baseten_usd: float = 100.0  # Baseten partner pool
-    max_rounds: int = 2
+    max_rounds: int = 15
+    max_sections: int = 15
     mock_mode: bool = False
     baseten_base_url: Optional[str] = None
     baseten_fallback_enabled: bool = False

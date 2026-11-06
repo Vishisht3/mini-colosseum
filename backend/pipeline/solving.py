@@ -3,7 +3,7 @@ Stage 4: Subproblem Solving with (3, 1) Tree Aggregation, Test-Time Scaling & Da
 Implements Section 6.1, Section 6.2, and Appendix B of Mini Colosseum Specification:
 - Topological scheduling of subproblem DAG; independent sections run concurrently.
 - (3, 1) Section Tree:
-  1. 3 Spark Open writers produce distinct proof candidates with structured <analysis>.
+  1. K Spark Open writers produce distinct proof candidates with structured <analysis>.
   2. A separate Wonder falsifier attacks EACH writer's candidate (critiques attached to each draft).
   3. A Spark Open aggregator synthesizes the candidates with their attached falsifier critiques.
   4. A final Wonder falsifier conducts the local review of the aggregated output.
@@ -17,9 +17,21 @@ Implements Section 6.1, Section 6.2, and Appendix B of Mini Colosseum Specificat
 """
 
 import asyncio
+import json
+import re
 import time
 from typing import Dict, Any, List, Callable, Awaitable, Tuple, Optional
-from ..models import Node, Edge, Event, SectionPlan, SubproblemSpec, HMEDRecord
+from ..models import (
+    Node,
+    Edge,
+    Event,
+    SectionPlan,
+    SubproblemSpec,
+    HMEDRecord,
+    SectionSolution,
+    FalsifierReport,
+    SectionReview,
+)
 from ..client import ModelClient
 from .decomposition import (
     compute_danus_fingerprint,
@@ -27,6 +39,64 @@ from .decomposition import (
     compute_dependency_fingerprint,
     normalize_section_body,
 )
+from .latex_utils import (
+    sanitize_latex_body,
+    extract_fields_from_truncated_json,
+    assemble_latex_document,
+)
+
+
+def _draft_body(draft: Any, section_title: str = "") -> str:
+    """Extract and sanitize a writer/aggregator proof body wherever the model put it."""
+    if not isinstance(draft, dict):
+        return ""
+    for key in ("solution_body", "latex_body", "proof_body", "proof", "body"):
+        value = draft.get(key)
+        if isinstance(value, str) and value.strip():
+            return sanitize_latex_body(value, section_title=section_title)
+    raw = draft.get("raw")
+    if isinstance(raw, str) and raw.strip():
+        try:
+            inner = json.loads(raw)
+            if isinstance(inner, dict):
+                body = _draft_body(inner, section_title=section_title)
+                if body:
+                    return body
+        except Exception:
+            pass
+        recovered = extract_fields_from_truncated_json(raw)
+        if recovered:
+            for key in ("solution_body", "latex_body", "revised_latex"):
+                val = recovered.get(key)
+                if isinstance(val, str) and val.strip():
+                    return sanitize_latex_body(val, section_title=section_title)
+        return sanitize_latex_body(raw.strip(), section_title=section_title)
+    return ""
+
+
+def _format_critique(critique: Any) -> str:
+    """Flatten a falsifier/review verdict into text the next writer can infer repairs from."""
+    if not isinstance(critique, dict) or not critique:
+        return "Audited (no structured critique recorded)."
+    parts = []
+    if critique.get("verdict"):
+        parts.append(f"Verdict: {critique['verdict']}")
+    if critique.get("assessment"):
+        parts.append(f"Assessment: {critique['assessment']}")
+    objections = critique.get("objections") or critique.get("fatal_objections") or []
+    for obj in objections:
+        if isinstance(obj, dict):
+            claim = obj.get("claim_attacked") or obj.get("claim") or ""
+            why = obj.get("why") or obj.get("description") or ""
+            severity = obj.get("severity", "major")
+            parts.append(f"- [{severity}] {claim}: {why}".strip())
+        elif obj:
+            parts.append(f"- {obj}")
+    for claim in critique.get("claims_not_established") or []:
+        parts.append(f"- Not established: {claim}")
+    if critique.get("suggested_repair"):
+        parts.append(f"Suggested repair: {critique['suggested_repair']}")
+    return "\n".join(parts) if parts else "Audited (no structured critique recorded)."
 
 
 class SectionSolvingEngine:
@@ -34,8 +104,8 @@ class SectionSolvingEngine:
         self,
         client: ModelClient,
         emit_event: Callable[[Event], Awaitable[None]],
-        save_node: Callable[[Node], None],
-        save_edge: Callable[[Edge], None],
+        save_node: Callable[[str, Node], None],
+        save_edge: Callable[[str, Edge], None],
         save_hmed: Optional[Callable[[Any], None]] = None,
     ):
         self.client = client
@@ -55,12 +125,13 @@ class SectionSolvingEngine:
         model_falsifier: str = "muse-wonder-1.0",
         force_section2_retry: bool = False,
         k_rollouts: int = 3,
+        existing_bodies: Optional[Dict[int, str]] = None,
     ) -> Tuple[Dict[int, str], str]:
         """
         Executes DAG scheduler using (3, 1) section trees with per-candidate falsifiers:
         - Resolves subproblems according to topological dependency edges.
         - Runs eligible independent sections concurrently.
-        - For each section: 3 writers -> 3 paired Wonder falsifiers -> 1 aggregator -> 1 local review.
+        - For each section: K writers -> K paired Wonder falsifiers -> 1 aggregator -> 1 local review.
         - Returns (completed_section_bodies, assembled_latex_document).
         """
         await self.emit_event(
@@ -75,14 +146,47 @@ class SectionSolvingEngine:
 
         subproblems = {sp.index: sp for sp in plan.subproblems}
         section_nodes: Dict[int, Node] = {}
-        completed_bodies: Dict[int, str] = {}
+        completed_bodies: Dict[int, str] = {
+            idx: sanitize_latex_body(body, section_title=subproblems[idx].title if idx in subproblems else "")
+            for idx, body in (existing_bodies or {}).items()
+            if isinstance(body, str) and body.strip()
+        }
         section_body_hashes: Dict[int, str] = {}
         subproblem_fps: Dict[int, str] = {sp.index: sp.danus_fingerprint for sp in plan.subproblems}
-        accepted_indices = set()
-        latex_skeleton = plan.latex_skeleton
+        accepted_indices = set(completed_bodies)
 
         # Initialize section nodes in Proof DAG
         for idx, sp in subproblems.items():
+            if idx in completed_bodies:
+                # Continuation: reuse the saved body; do not overwrite its node.
+                sp.solution_body = completed_bodies[idx]
+                section_body_hashes[idx] = compute_body_hash(completed_bodies[idx])
+                section_nodes[idx] = Node(
+                    id=f"SEC_{sp.index}",
+                    type="solver",
+                    stage="solving",
+                    round=round_num,
+                    status="conditional",
+                    parents=[f"SEC_{dep}" for dep in sp.dependencies],
+                    label=f"SEC_{sp.index}",
+                    input_summary=f"Subproblem {sp.index}: {sp.title}",
+                    output={"target_claim": sp.target_claim, "title": sp.title, "solution_body": completed_bodies[idx]},
+                )
+                await self.emit_event(
+                    Event(
+                        run_id=run_id,
+                        seq=0,
+                        timestamp=time.strftime("%H:%M:%S"),
+                        event_type="log_line",
+                        payload={
+                            "stage": "solving",
+                            "severity": "info",
+                            "text": f"Reusing saved Section {sp.index} body ({len(completed_bodies[idx])} chars); skipping re-solve.",
+                            "node_id": f"SEC_{sp.index}",
+                        },
+                    )
+                )
+                continue
             node_id = f"SEC_{sp.index}"
             parent_node_ids = [f"SEC_{dep}" for dep in sp.dependencies]
             sol_route = self.client.get_route("solver", model_override=model_solver)
@@ -130,12 +234,17 @@ class SectionSolvingEngine:
                     )
                 )
 
-        # Number of writers in section tree: default 3 (Section 6.1 / Appendix B)
+        # Number of writers in section tree: default 3-4 (Section 6.1 / Appendix B)
         n_writers = max(2, min(k_rollouts, 4))
         max_retries_per_section = 2
         in_flight_tasks: Dict[int, asyncio.Task] = {}
 
-        async def solve_single_section(idx: int, retry_count: int, prior_critique: str = "", prior_failed_body: str = "") -> bool:
+        async def solve_single_section(
+            idx: int,
+            retry_count: int,
+            prior_critique: str = "",
+            prior_failed_body: str = "",
+        ) -> bool:
             sp = subproblems[idx]
             node = section_nodes[idx]
             node.status = "running"
@@ -163,7 +272,7 @@ class SectionSolvingEngine:
                     payload={
                         "stage": "solving",
                         "severity": "info",
-                        "text": f"Solving Section {sp.index}: '{sp.title}' (attempt {retry_count + 1}, (3,1) tree: {n_writers} writers + per-candidate falsifiers)",
+                        "text": f"Solving Section {sp.index}: '{sp.title}' (attempt {retry_count + 1}, ({n_writers},1) tree: {n_writers} writers + per-candidate falsifiers)",
                         "node_id": node.id,
                     },
                 )
@@ -171,16 +280,24 @@ class SectionSolvingEngine:
 
             # Upstream context
             dep_context = "\n\n".join(
-                [f"=== Upstream Section {dep} ({subproblems[dep].title}) ===\n{completed_bodies.get(dep, '')}" for dep in sp.dependencies]
+                [
+                    f"=== Upstream Section {dep} ({subproblems[dep].title}) ===\n{completed_bodies.get(dep, '')}"
+                    for dep in sp.dependencies
+                    if dep in subproblems
+                ]
             )
+            obligations_context = ""
+            if sp.obligations:
+                obligations_context = "\nSection Obligations to discharge:\n" + "\n".join(f"- {ob}" for ob in sp.obligations) + "\n"
 
             solve_prompt = (
                 f"Problem: {problem}\n\n"
                 f"Section to prove: Section {sp.index}: {sp.title}\n"
-                f"Target Claim: {sp.target_claim}\n\n"
+                f"Target Claim: {sp.target_claim}\n"
+                f"{obligations_context}\n"
                 f"Established Upstream Lemmas:\n{dep_context}\n\n"
                 "Return JSON with: status ('solved', 'partial', 'blocked'), "
-                "solution_body (the full LaTeX proof of this section, with $...$ math), "
+                "solution_body (the complete, self-contained LaTeX proof of this section using \\begin{definition}, \\begin{lemma}, \\begin{proposition}, \\begin{theorem}, and \\begin{proof} environments; do NOT include a leading \\section{...} command as the master document already provides it; ensure all $...$ and \\[...\\] math delimiters are balanced), "
                 "claimed_result, bridge_claims[], open_obligations[]."
             )
             if prior_critique:
@@ -192,6 +309,7 @@ class SectionSolvingEngine:
                     role="solver",
                     prompt=solve_prompt + f"\n\n[Writer {w_num}/{n_writers}: Explore distinct proof derivation variant]",
                     model=model_solver,
+                    schema=SectionSolution,
                     stable_prefix=knowledge_prefix,
                     reasoning_effort="medium",
                     context_hints={
@@ -217,10 +335,16 @@ class SectionSolvingEngine:
             node.cost_usd += total_s_cost
 
             raw_drafts = [r[0] for r in writer_results]
+            for d in raw_drafts:
+                if isinstance(d, dict):
+                    clean_b = _draft_body(d, section_title=sp.title)
+                    if clean_b:
+                        d["solution_body"] = clean_b
+                        d["latex_body"] = clean_b
 
             # --- STEP 2: Attack EACH writer's draft with a Wonder Falsifier (Section 6.1 / Appendix B) ---
             async def falsify_draft(draft_idx: int, draft: Dict[str, Any]) -> Tuple[Dict[str, Any], int, int, int, float]:
-                body = draft.get("solution_body") or draft.get("latex_body") or draft.get("body", "")
+                body = _draft_body(draft, section_title=sp.title)
                 f_prompt = (
                     f"Section {sp.index} Claim: {sp.target_claim}\n\n"
                     f"Candidate Proof Body (Writer {draft_idx + 1}):\n{body}\n\n"
@@ -231,6 +355,7 @@ class SectionSolvingEngine:
                     role="section_falsifier",
                     prompt=f_prompt,
                     model=model_falsifier,
+                    schema=FalsifierReport,
                     stable_prefix=knowledge_prefix,
                     reasoning_effort="medium",
                     context_hints={
@@ -259,17 +384,18 @@ class SectionSolvingEngine:
                 f"Problem: {problem}\n\n"
                 f"Section {sp.index}: {sp.title}\n"
                 f"Target Claim: {sp.target_claim}\n\n"
-                f"You are the Section Aggregator. Synthesize the {n_writers} candidate proof drafts below along with their Wonder falsifier critiques into a single, cohesive, rigorous proof body for this section.\n"
-                "Resolve any objections raised by the falsifiers while preserving valid lemmas.\n\n"
+                f"You are the Section Aggregator. Synthesize the {n_writers} candidate proof drafts below along with their Wonder falsifier critiques into a single, cohesive, rigorous LaTeX proof body for this section.\n"
+                "Resolve any objections raised by the falsifiers while preserving valid lemmas. Use formal LaTeX environments (\\begin{definition}, \\begin{lemma}, \\begin{theorem}, \\begin{proof}) and do NOT include a leading \\section{...} heading.\n\n"
             )
             for i, draft in enumerate(raw_drafts):
-                critique_summary = draft.get("falsifier_critique", {}).get("assessment", "Audited.")
-                agg_prompt += f"--- Candidate {i+1} ---\n{draft.get('solution_body') or draft.get('latex_body') or ''}\nCritique: {critique_summary}\n\n"
+                critique_summary = _format_critique(draft.get("falsifier_critique"))
+                agg_prompt += f"--- Candidate {i+1} ---\n{_draft_body(draft, section_title=sp.title)}\nCritique: {critique_summary}\n\n"
 
             agg_res = await self.client.call(
                 role="solver",
                 prompt=agg_prompt,
                 model=model_solver,
+                schema=SectionSolution,
                 stable_prefix=knowledge_prefix,
                 reasoning_effort="medium",
                 context_hints={
@@ -286,12 +412,15 @@ class SectionSolvingEngine:
             node.cost_usd += a_cost
 
             # Aggregated candidate is primary
-            aggregated_solution = agg_out
-            if not aggregated_solution.get("solution_body"):
-                aggregated_solution["solution_body"] = raw_drafts[0].get("solution_body") or raw_drafts[0].get("latex_body", "")
+            aggregated_solution = dict(agg_out) if isinstance(agg_out, dict) else {}
+            normalized_body = _draft_body(aggregated_solution, section_title=sp.title)
+            if not normalized_body:
+                normalized_body = max((_draft_body(d, section_title=sp.title) for d in raw_drafts), key=len, default="")
+            aggregated_solution["solution_body"] = sanitize_latex_body(normalized_body, section_title=sp.title)
+            aggregated_solution["latex_body"] = aggregated_solution["solution_body"]
 
             node.output = aggregated_solution
-            node.analysis = aggregated_solution.get("analysis") or raw_drafts[0].get("analysis")
+            node.analysis = aggregated_solution.get("analysis") or (raw_drafts[0].get("analysis") if raw_drafts else None)
             sol_route = self.client.get_route("solver", model_override=model_solver)
             node.provider = getattr(agg_res, "provider", "meta")
             node.model = getattr(agg_res, "model", model_solver)
@@ -311,6 +440,7 @@ class SectionSolvingEngine:
                 role="section_falsifier",
                 prompt=review_prompt,
                 model=model_falsifier,
+                schema=SectionReview,
                 stable_prefix=knowledge_prefix,
                 reasoning_effort="medium",
                 context_hints={
@@ -332,8 +462,9 @@ class SectionSolvingEngine:
             # Section 6.1: Ready or conditional is accepted
             if review_verdict in ["ready", "conditional"]:
                 node.status = "accepted" if review_verdict == "ready" else "conditional"
-                sol_body = aggregated_solution.get("solution_body", "")
+                sol_body = sanitize_latex_body(aggregated_solution.get("solution_body", ""), section_title=sp.title)
                 completed_bodies[idx] = sol_body
+                sp.solution_body = sol_body
 
                 # Body hash and dependency fingerprint (Section 6.6)
                 old_body_hash = section_body_hashes.get(idx, "")
@@ -395,6 +526,29 @@ class SectionSolvingEngine:
 
                 self.save_node(run_id, node)
 
+                # A section that recovers after an earlier blocked attempt
+                # must release dependents marked invalidated by that attempt.
+                for downstream_idx, downstream_sp in subproblems.items():
+                    if idx in downstream_sp.dependencies and section_nodes[downstream_idx].is_invalidated:
+                        section_nodes[downstream_idx].is_invalidated = False
+                        section_nodes[downstream_idx].status = "pending"
+                        downstream_sp.is_invalidated = False
+                        self.save_node(run_id, section_nodes[downstream_idx])
+                        await self.emit_event(
+                            Event(
+                                run_id=run_id,
+                                seq=0,
+                                timestamp=time.strftime("%H:%M:%S"),
+                                event_type="log_line",
+                                payload={
+                                    "stage": "solving",
+                                    "severity": "info",
+                                    "text": f"SEC_{idx} accepted; downstream SEC_{downstream_idx} invalidation cleared.",
+                                    "node_id": section_nodes[downstream_idx].id,
+                                },
+                            )
+                        )
+
                 # Record revision-consequence tuple for HMED distillation if retried
                 if retry_count > 0 and self.save_hmed:
                     hmed = HMEDRecord(
@@ -440,7 +594,7 @@ class SectionSolvingEngine:
                 # Section Rejected -> local retry up to 2 times, then blocked
                 node.status = "rejected"
                 self.save_node(run_id, node)
-                critique_msg = rev_out.get("assessment", "Fatal defects identified in section solution.")
+                critique_msg = _format_critique(rev_out)
 
                 await self.emit_event(
                     Event(
@@ -478,6 +632,12 @@ class SectionSolvingEngine:
                 else:
                     # Retry limit reached -> mark blocked, invalidate dependents (Section 6.1 / 6.6)
                     node.status = "blocked"
+                    fallback_body = sanitize_latex_body(
+                        aggregated_solution.get("solution_body", ""),
+                        section_title=sp.title,
+                    )
+                    if fallback_body:
+                        completed_bodies[idx] = fallback_body
                     self.save_node(run_id, node)
                     await self.emit_event(
                         Event(
@@ -553,15 +713,8 @@ class SectionSolvingEngine:
                 if success:
                     accepted_indices.add(c_idx)
 
-        # Assemble LaTeX document
-        assembled_latex = latex_skeleton
-        for idx, body in completed_bodies.items():
-            placeholder = f"%% SECTION_BODY_{idx} %%"
-            if placeholder in assembled_latex:
-                assembled_latex = assembled_latex.replace(placeholder, body)
-            else:
-                assembled_latex += f"\n\n% Section {idx}\n{body}"
-
+        # Assemble clean, 1-to-1 aligned LaTeX document
+        assembled_latex = assemble_latex_document(plan, completed_bodies)
         return completed_bodies, assembled_latex
 
     async def _re_review_stale_section(
@@ -588,6 +741,7 @@ class SectionSolvingEngine:
             role="section_falsifier",
             prompt=prompt,
             model=model_falsifier,
+            schema=SectionReview,
             stable_prefix=knowledge_prefix,
             reasoning_effort="medium",
             context_hints={"section_index": idx, "is_stale_rereview": True},

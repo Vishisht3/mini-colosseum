@@ -33,7 +33,7 @@ FIREWORKS_API_KEY = os.environ.get("FIREWORKS_API_KEY", "")
 FIREWORKS_MODEL_ID = os.environ.get("FIREWORKS_MODEL_ID", "accounts/fireworks/models/llama-v3p3-70b-instruct")
 
 # User-Configured Spending Caps & Budgets (USD)
-DEFAULT_RUN_BUDGET_CAP = 7.00
+DEFAULT_RUN_BUDGET_CAP = 50.00
 DEFAULT_META_BUDGET_CAP = 150.00
 DEFAULT_BASETEN_BUDGET_CAP = 100.00
 DEFAULT_FIREWORKS_BUDGET_CAP = 100.00
@@ -157,21 +157,23 @@ DEFAULT_ROLE_MODELS: Dict[str, str] = {
     role: route.primary.model for role, route in MODEL_ROUTES.items()
 }
 
-FIXED_TREE_WIDTHS = [9, 6, 3, 1]
+FIXED_TREE_WIDTHS = [12, 8, 4, 1]
+DEFAULT_MAX_ROUNDS = 15
+DEFAULT_MAX_SECTIONS = 15
 FIXED_SAMPLE_COUNT = 4
 FIXED_ROLLOUT_COUNT = 4
 
 # Provider request output caps by role (hard guardrail for per-call spend).
 ROLE_OUTPUT_TOKEN_CAPS: Dict[str, int] = {
-    "explorer": 2500,
-    "aggregator": 3000,
-    "solver": 2200,
-    "curator": 1200,
-    "falsifier": 4000,
-    "gate": 3000,
-    "decomposer": 6000,
-    "section_falsifier": 4000,
-    "global_verifier": 6000,
+    "explorer": 4096,
+    "aggregator": 6000,
+    "solver": 8192,
+    "curator": 2048,
+    "falsifier": 4096,
+    "gate": 4096,
+    "decomposer": 8192,
+    "section_falsifier": 4096,
+    "global_verifier": 8192,
 }
 
 

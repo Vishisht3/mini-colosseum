@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -306,7 +306,7 @@
       <div class="status-segment" id="status-tokens">0k tok</div>
       <div class="status-segment" id="status-meta-budget" title="Meta Model API (muse-wonder-1.0) Pool: $150 Limit">Meta: $0.00 / $150</div>
       <div class="status-segment" id="status-baseten-budget" title="Baseten (muse-spark-open-1026) Pool: $100 Limit">Baseten: $0.00 / $100</div>
-      <div class="status-segment" id="status-cost" title="Active Run Budget and Hard Cap">SPEND: $0.00 / $7.00</div>
+      <div class="status-segment" id="status-cost" title="Active Run Budget and Hard Cap">SPEND: $0.00 / $50.00</div>
       <div class="status-segment fireworks-status" id="fireworks-status"></div>
     </div>
 
@@ -338,7 +338,22 @@
         </div>
         <div class="form-group">
           <label class="form-label">Budget cap (USD):</label>
-          <input class="form-input" id="input-run-budget-cap" type="number" min="0.5" step="0.5" placeholder="7.00">
+          <input class="form-input" id="input-run-budget-cap" type="number" min="0.5" step="0.5" value="50.00" placeholder="50.00">
+          <span class="form-help">Auto-stops when reached</span>
+        </div>
+        <div class="form-group" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 8px;">
+          <div>
+            <label class="form-label">Max Rounds:</label>
+            <input class="form-input" id="input-max-rounds" type="number" min="1" max="20" value="15">
+          </div>
+          <div>
+            <label class="form-label">Tree Widths:</label>
+            <input class="form-input" id="input-tree-widths" type="text" value="12, 8, 4, 1" placeholder="12, 8, 4, 1">
+          </div>
+          <div>
+            <label class="form-label">Sample / Rollout K:</label>
+            <input class="form-input" id="input-k-sample" type="number" min="2" max="8" value="4">
+          </div>
           <span class="form-help">Auto-stops when reached</span>
         </div>
       </div>

@@ -22,6 +22,7 @@ import random
 import logging
 from typing import Dict, Any, Optional, Tuple, Type, Callable, Awaitable, List
 from pydantic import BaseModel
+from .pipeline.latex_utils import repair_json_latex_escapes, extract_fields_from_truncated_json
 from .config import (
     PRICING_TABLE,
     RATE_LIMITS,
@@ -771,6 +772,39 @@ class ModelClient:
         if text.endswith("```"):
             text = text[:-3]
         text = text.strip()
+        for candidate in (repair_json_latex_escapes(text), text):
+            try:
+                parsed = json.loads(candidate)
+                if isinstance(parsed, dict):
+                    return parsed
+            except json.JSONDecodeError:
+                pass
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            sub = text[start : end + 1]
+            for candidate in (repair_json_latex_escapes(sub), sub):
+                try:
+                    parsed = json.loads(candidate)
+                    if isinstance(parsed, dict):
+                        return parsed
+                except json.JSONDecodeError:
+                    pass
+        if start != -1:
+            recovered = extract_fields_from_truncated_json(text[start:])
+            if recovered:
+                return recovered
+        return {"raw": text}
+
+    def _legacy_extract_json(self, text: str) -> Dict[str, Any]:
+        text = text.strip()
+        if text.startswith("```json"):
+            text = text[7:]
+        if text.startswith("```"):
+            text = text[3:]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
         try:
             return json.loads(text)
         except json.JSONDecodeError:
@@ -791,6 +825,13 @@ class ModelClient:
         # schema's main text field rather than validating into empty defaults.
         if isinstance(parsed, dict) and isinstance(parsed.get("raw"), str) and parsed["raw"].strip():
             raw = parsed["raw"].strip()
+            if raw.startswith("{"):
+                recovered = extract_fields_from_truncated_json(raw)
+                if recovered:
+                    try:
+                        return schema.model_validate(recovered).model_dump()
+                    except Exception:
+                        pass
             try:
                 inner = json.loads(raw)
                 if isinstance(inner, dict):

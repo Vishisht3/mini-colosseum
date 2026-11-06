@@ -36,10 +36,11 @@ try:
 except ImportError:
     Document = None  # type: ignore
 
-from .models import RunConfig, Event
+from .models import RunConfig, Event, KnowledgeEntry
 from .store import RunStore
 from .client import ModelClient
 from .pipeline.orchestrator import Orchestrator
+from .pipeline.continuation import build_continuation_seed
 from .config import (
     META_API_BASE_URL,
     META_API_KEY,
@@ -170,6 +171,8 @@ def get_run_lifecycle_lock() -> asyncio.Lock:
 
 
 def _keychain_get(service: str, key: str) -> Optional[str]:
+    if "pytest" in sys.modules or os.environ.get("MINI_COLOSSEUM_DISABLE_KEYRING"):
+        return None
     try:
         import keyring
         return keyring.get_password(service, key)
@@ -178,6 +181,8 @@ def _keychain_get(service: str, key: str) -> Optional[str]:
 
 
 def _keychain_set(service: str, key: str, value: str):
+    if "pytest" in sys.modules or os.environ.get("MINI_COLOSSEUM_DISABLE_KEYRING"):
+        return
     try:
         import keyring
         if value:
@@ -189,6 +194,8 @@ def _keychain_set(service: str, key: str, value: str):
 
 
 def _keychain_delete(service: str, key: str):
+    if "pytest" in sys.modules or os.environ.get("MINI_COLOSSEUM_DISABLE_KEYRING"):
+        return
     try:
         import keyring
         keyring.delete_password(service, key)
@@ -494,7 +501,8 @@ async def shutdown():
         active_orchestrator.stop()
     if active_task and not active_task.done():
         active_task.cancel()
-    asyncio.get_event_loop().call_later(0.5, lambda: os._exit(0))
+    if "pytest" not in sys.modules:
+        asyncio.get_event_loop().call_later(0.5, lambda: os._exit(0))
     return {"status": "shutting_down"}
 
 app.add_middleware(
@@ -550,7 +558,11 @@ class StartRunRequest(BaseModel):
     budget_cap_meta_usd: float = DEFAULT_META_BUDGET_CAP
     budget_cap_baseten_usd: float = DEFAULT_BASETEN_BUDGET_CAP
     budget_cap_fireworks_usd: float = DEFAULT_FIREWORKS_BUDGET_CAP
-    max_rounds: int = 2
+    max_rounds: int = 15
+    max_sections: int = 15
+    tree_widths: Optional[List[int]] = None
+    k_sample: Optional[int] = None
+    k_rollouts: Optional[int] = None
     cross_model_review: bool = True
     mock_mode: bool = False
 
@@ -639,9 +651,10 @@ async def start_run(req: StartRunRequest):
 
         config = RunConfig(
             problem_statement=statement,
-            tree_widths=FIXED_TREE_WIDTHS,
-            k_sample=FIXED_SAMPLE_COUNT,
-            k_rollouts=FIXED_ROLLOUT_COUNT,
+            tree_widths=req.tree_widths if req.tree_widths else FIXED_TREE_WIDTHS,
+            max_sections=req.max_sections,
+            k_sample=req.k_sample if req.k_sample else FIXED_SAMPLE_COUNT,
+            k_rollouts=req.k_rollouts if req.k_rollouts else FIXED_ROLLOUT_COUNT,
             cross_model_review=req.cross_model_review,
             models_per_role=server_settings.get("default_models", DEFAULT_ROLE_MODELS.copy()),
             budget_cap_usd=req.budget_cap_usd,
@@ -714,6 +727,128 @@ async def resume_run():
         active_orchestrator.resume()
         return {"status": "resumed"}
     return {"status": "no_active_run"}
+
+
+class ContinueRunRequest(BaseModel):
+    budget_cap_usd: Optional[float] = None
+    budget_cap_meta_usd: Optional[float] = None
+    budget_cap_baseten_usd: Optional[float] = None
+    budget_cap_fireworks_usd: Optional[float] = None
+    max_rounds: Optional[int] = None
+
+
+@app.post("/api/runs/{run_id}/continue")
+async def continue_run(run_id: str, req: Optional[ContinueRunRequest] = None):
+    """Continue a saved run from its decomposition: reuse written section
+    bodies, solve only the missing sections, then verify. The run keeps its
+    id and its cost ledger; prior spend counts toward the budget cap, so
+    pass a higher budget_cap_usd when the saved cap is nearly exhausted."""
+    global active_orchestrator, active_task
+    req = req or ContinueRunRequest()
+
+    async with get_run_lifecycle_lock():
+        if active_task and not active_task.done():
+            raise HTTPException(status_code=409, detail="Another run is still active. Stop it before continuing a saved run.")
+
+        run = store.get_run(run_id)
+        if not run:
+            raise HTTPException(status_code=404, detail="Run not found")
+        if run.get("status") == "running":
+            raise HTTPException(status_code=409, detail="Run is already marked running.")
+
+        trace = store.export_trace_json(run_id)
+        try:
+            seed = build_continuation_seed(trace)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+        saved_cfg = {}
+        if run.get("config_json"):
+            try:
+                saved_cfg = json.loads(run["config_json"])
+            except Exception:
+                saved_cfg = {}
+
+        mock_mode = bool(saved_cfg.get("mock_mode") or server_settings.get("mock_mode", False))
+        if not server_settings.get("api_key") and not mock_mode:
+            raise HTTPException(status_code=400, detail="Meta API key must be configured before continuing a run.")
+
+        baseten_key = server_settings.get("baseten_api_key") or None
+        fallback_enabled = bool(server_settings.get("baseten_fallback_enabled", False)) and bool(baseten_key)
+        fireworks_key = server_settings.get("fireworks_api_key") or None
+        fireworks_enabled = bool(server_settings.get("fireworks_fallback_enabled", False)) and bool(fireworks_key)
+
+        config = RunConfig(
+            run_id=run_id,
+            problem_statement=run.get("problem") or saved_cfg.get("problem_statement", ""),
+            tree_widths=saved_cfg.get("tree_widths") or FIXED_TREE_WIDTHS,
+            k_sample=saved_cfg.get("k_sample") or FIXED_SAMPLE_COUNT,
+            k_rollouts=saved_cfg.get("k_rollouts") or FIXED_ROLLOUT_COUNT,
+            cross_model_review=bool(saved_cfg.get("cross_model_review", True)),
+            models_per_role=saved_cfg.get("models_per_role") or server_settings.get("default_models", DEFAULT_ROLE_MODELS.copy()),
+            budget_cap_usd=req.budget_cap_usd if req.budget_cap_usd is not None else float(saved_cfg.get("budget_cap_usd") or DEFAULT_RUN_BUDGET_CAP),
+            budget_cap_meta_usd=req.budget_cap_meta_usd if req.budget_cap_meta_usd is not None else float(saved_cfg.get("budget_cap_meta_usd") or DEFAULT_META_BUDGET_CAP),
+            budget_cap_baseten_usd=req.budget_cap_baseten_usd if req.budget_cap_baseten_usd is not None else float(saved_cfg.get("budget_cap_baseten_usd") or DEFAULT_BASETEN_BUDGET_CAP),
+            budget_cap_fireworks_usd=req.budget_cap_fireworks_usd if req.budget_cap_fireworks_usd is not None else float(saved_cfg.get("budget_cap_fireworks_usd") or DEFAULT_FIREWORKS_BUDGET_CAP),
+            max_rounds=req.max_rounds if req.max_rounds is not None else int(saved_cfg.get("max_rounds") or 2),
+            baseten_base_url=server_settings.get("baseten_base_url"),
+            baseten_fallback_enabled=fallback_enabled,
+            fireworks_base_url=server_settings.get("fireworks_base_url"),
+            fireworks_fallback_enabled=fireworks_enabled,
+            mock_mode=mock_mode,
+        )
+
+        client = ModelClient(
+            api_key=server_settings.get("api_key") or ("mock-meta-key" if mock_mode else ""),
+            base_url=server_settings.get("base_url"),
+            baseten_api_key=baseten_key,
+            baseten_base_url=server_settings.get("baseten_base_url"),
+            baseten_fallback_enabled=fallback_enabled,
+            fireworks_api_key=fireworks_key,
+            fireworks_base_url=server_settings.get("fireworks_base_url"),
+            fireworks_fallback_enabled=fireworks_enabled,
+            budget_cap_usd=config.budget_cap_usd,
+            budget_cap_meta_usd=config.budget_cap_meta_usd,
+            budget_cap_baseten_usd=config.budget_cap_baseten_usd,
+            budget_cap_fireworks_usd=config.budget_cap_fireworks_usd,
+            mock_mode=mock_mode,
+        )
+        # Prior spend stays in the same ledger and counts toward the cap.
+        client.cumulative_cost_usd = float(run.get("cost_usd") or 0)
+        client.cumulative_meta_usd = float(run.get("cost_meta_usd") or 0)
+        client.cumulative_baseten_usd = float(run.get("cost_baseten_usd") or 0)
+        client.total_tokens_in = int(run.get("tokens_in") or 0)
+        client.total_tokens_cached = int(run.get("tokens_cached") or 0)
+        client.total_tokens_out = int(run.get("tokens_out") or 0)
+        client.total_meta_tokens_in = int(run.get("tokens_meta_in") or 0)
+        client.total_meta_tokens_out = int(run.get("tokens_meta_out") or 0)
+        client.total_baseten_tokens_in = int(run.get("tokens_baseten_in") or 0)
+        client.total_baseten_tokens_out = int(run.get("tokens_baseten_out") or 0)
+
+        active_orchestrator = Orchestrator(
+            config=config,
+            store=store,
+            client=client,
+            event_callback=broadcast_event,
+        )
+        for entry in trace.get("knowledge_directory") or []:
+            try:
+                active_orchestrator.knowledge_entries.append(KnowledgeEntry(**entry))
+            except Exception:
+                continue
+
+        active_task = asyncio.create_task(
+            active_orchestrator.execute(seed_plan=seed.plan, seed_bodies=seed.existing_bodies, resume_existing=True)
+        )
+
+        return {
+            "status": "continued",
+            "run_id": run_id,
+            "reused_sections": sorted(seed.existing_bodies),
+            "missing_sections": seed.missing_indices,
+            "prior_cost_usd": client.cumulative_cost_usd,
+            "budget_cap_usd": config.budget_cap_usd,
+        }
 
 
 @app.post("/api/runs/step")

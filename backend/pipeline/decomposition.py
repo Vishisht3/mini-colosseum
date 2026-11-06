@@ -11,9 +11,10 @@ Based on Section 5.3 of Mini-Colosseum Specification v2.0.
 import time
 import hashlib
 import unicodedata
-from typing import Dict, Any, List, Callable, Awaitable, Tuple
+from typing import Dict, Any, List, Optional, Callable, Awaitable, Tuple
 from ..models import Node, Edge, Event, SectionPlan, SubproblemSpec
 from ..client import ModelClient
+from .latex_utils import canonicalize_latex_skeleton
 
 
 class CycleDetectedError(Exception):
@@ -57,8 +58,8 @@ class DecompositionEngine:
         self,
         client: ModelClient,
         emit_event: Callable[[Event], Awaitable[None]],
-        save_node: Callable[[Node], None],
-        save_edge: Callable[[Edge], None],
+        save_node: Callable[[str, Node], None],
+        save_edge: Callable[[str, Edge], None],
     ):
         self.client = client
         self.emit_event = emit_event
@@ -78,7 +79,7 @@ class DecompositionEngine:
         for sp in subproblems:
             u = sp["index"]
             for dep in sp.get("dependencies", []):
-                if dep in index_set:
+                if dep in index_set and dep != u:
                     adj[dep].append(u)
                     in_degree[u] += 1
 
@@ -106,10 +107,12 @@ class DecompositionEngine:
         round_num: int = 1,
         knowledge_prefix: str = "",
         model_decomposer: str = "muse-wonder-1.0",
+        max_sections: int = 15,
+        gate_obligations: Optional[List[Any]] = None,
     ) -> Tuple[Node, SectionPlan]:
         """
         Decomposes approved strategy into topological subproblems, computes Danus fingerprints,
-        and creates LaTeX skeleton.
+        and creates a 1-to-1 aligned LaTeX skeleton.
         """
         dec_node_id = f"R{round_num}_DEC"
         dec_route = self.client.get_route("decomposer", model_override=model_decomposer)
@@ -149,13 +152,26 @@ class DecompositionEngine:
             )
         )
 
+        obligations_text = ""
+        if gate_obligations:
+            obligations_lines = []
+            for ob in gate_obligations:
+                if isinstance(ob, dict):
+                    obligations_lines.append(f"- [{ob.get('severity', 'minor')}] {ob.get('id', '')}")
+                else:
+                    obligations_lines.append(f"- {ob}")
+            obligations_text = "\nGate Obligations that MUST be discharged across sections:\n" + "\n".join(obligations_lines) + "\n\n"
+
         prompt = (
             f"Problem statement: {problem}\n\n"
             f"Approved Strategy:\n{strategy_root.output}\n\n"
-            "Decompose this strategy into an ordered list of concrete, non-trivial subproblems in topological order.\n"
-            "Each subproblem must specify: index (1, 2, ...), title, target_claim, and dependencies (list of earlier subproblem indices).\n"
-            "Also produce a clean LaTeX master-document skeleton with placeholder tags (e.g. %% SECTION_BODY_1 %%).\n"
-            "Ensure the dependencies form a strict Directed Acyclic Graph without cycles."
+            f"{obligations_text}"
+            f"Decompose this proof strategy into an ordered list of concrete, rigorous mathematical sections (up to {max_sections} sections) in strict topological order.\n"
+            "Requirements:\n"
+            "1. Number the sections strictly starting at 1 (index: 1, 2, ..., N). Do NOT use 0-based indexing.\n"
+            "2. Each subproblem must specify: index (1..N), title, target_claim (exact theorem/lemma statement to prove in that section), and dependencies (list of strictly earlier section indices < index).\n"
+            "3. Produce a clean, publication-grade LaTeX master-document skeleton ('latex_skeleton') whose \\section{...} headers and %% SECTION_BODY_k %% placeholders match the subproblems 1-to-1 in order 1..N.\n"
+            "4. Ensure the dependencies form a strict Directed Acyclic Graph without cycles."
         )
 
         call_res = await self.client.call(
@@ -175,14 +191,12 @@ class DecompositionEngine:
         dec_node.fallback_used = getattr(call_res, "fallback_used", False)
         dec_node.fallback_reason = getattr(call_res, "fallback_reason", None)
 
-        # Validate DAG and enforce at most 6 sections (Section 6.1)
+        cap_sections = max(3, min(int(max_sections or 15), 20))
         subproblems_raw = out.get("subproblems", [])
-        if len(subproblems_raw) > 6:
-            subproblems_raw = subproblems_raw[:6]
+        if len(subproblems_raw) > cap_sections:
+            subproblems_raw = subproblems_raw[:cap_sections]
 
         if not subproblems_raw:
-            # An empty plan must never be "accepted": ask once for a real
-            # list of sections, then fail honestly if none arrives.
             await self.emit_event(
                 Event(
                     run_id=run_id,
@@ -201,8 +215,8 @@ class DecompositionEngine:
                 role="decomposer",
                 prompt=(
                     f"Problem statement: {problem}\n\n"
-                    "Your previous reply contained no sections. Return a JSON object with a non-empty "
-                    "'subproblems' list of 2 to 6 concrete sections in dependency order. Each item must have: "
+                    f"Your previous reply contained no sections. Return a JSON object with a non-empty "
+                    f"'subproblems' list of 4 to {cap_sections} concrete sections in dependency order (1-indexed: 1..N). Each item must have: "
                     "index, title, target_claim, dependencies. Also include 'latex_skeleton' with %% SECTION_BODY_1 %% style placeholders."
                 ),
                 model=model_decomposer,
@@ -215,14 +229,13 @@ class DecompositionEngine:
             t_out += r_out
             cost += r_cost
             out = repair_out
-            subproblems_raw = out.get("subproblems", [])[:6]
+            subproblems_raw = out.get("subproblems", [])[:cap_sections]
             if not subproblems_raw:
                 raise RuntimeError("Decomposition produced no sections, so no proof could be written.")
 
         try:
             topo_order = self.validate_acyclic(subproblems_raw)
         except CycleDetectedError as err:
-            # Section 6.1: Ask once for a repair if cyclic
             await self.emit_event(
                 Event(
                     run_id=run_id,
@@ -240,8 +253,8 @@ class DecompositionEngine:
             repair_prompt = (
                 f"Problem statement: {problem}\n\n"
                 f"The decomposition produced a cycle error: {err}.\n"
-                "Repair this decomposition into an ordered list of at most 6 subproblems forming a strict Directed Acyclic Graph (DAG) without cycles.\n"
-                "Each subproblem must specify: index, title, target_claim, and dependencies."
+                f"Repair this decomposition into an ordered list of at most {cap_sections} subproblems (1-indexed: 1..N) forming a strict Directed Acyclic Graph (DAG) without cycles.\n"
+                "Each subproblem must specify: index, title, target_claim, and dependencies (only indices strictly less than index)."
             )
             repair_out, r_in, r_cached, r_out, r_cost = await self.client.call(
                 role="decomposer",
@@ -256,8 +269,26 @@ class DecompositionEngine:
             t_out += r_out
             cost += r_cost
             out = repair_out
-            subproblems_raw = out.get("subproblems", [])[:6]
+            subproblems_raw = out.get("subproblems", [])[:cap_sections]
             topo_order = self.validate_acyclic(subproblems_raw)
+
+        # Attach any Gate obligations assigned to specific sections
+        if gate_obligations:
+            for ob in gate_obligations:
+                if isinstance(ob, dict):
+                    ob_id = str(ob.get("id", "")).strip()
+                    assigned = ob.get("assigned_section")
+                else:
+                    ob_id = str(getattr(ob, "id", ob)).strip()
+                    assigned = getattr(ob, "assigned_section", None)
+                if not ob_id:
+                    continue
+                target_idx = int(assigned) if isinstance(assigned, int) and 1 <= assigned <= len(subproblems_raw) else len(subproblems_raw)
+                for sp in subproblems_raw:
+                    if sp["index"] == target_idx:
+                        sp.setdefault("obligations", [])
+                        if ob_id not in sp["obligations"]:
+                            sp["obligations"].append(ob_id)
 
         # Compute Danus SHA-256 fingerprints in topological order
         subproblems_by_index = {sp["index"]: sp for sp in subproblems_raw}
@@ -269,6 +300,14 @@ class DecompositionEngine:
             sp["danus_fingerprint"] = fp
             sp["dependency_fingerprints"] = dep_fps
             subproblem_fps[idx] = fp
+
+        # Canonicalize the LaTeX skeleton so \section{title} and %% SECTION_BODY_k %% match 1-to-1
+        canonical_skeleton = canonicalize_latex_skeleton(
+            out.get("latex_skeleton", ""),
+            subproblems_raw,
+        )
+        out["subproblems"] = subproblems_raw
+        out["latex_skeleton"] = canonical_skeleton
 
         dec_node.output = out
         dec_node.tokens_in = t_in
@@ -308,6 +347,6 @@ class DecompositionEngine:
 
         plan = SectionPlan(
             subproblems=[SubproblemSpec(**sp) for sp in subproblems_raw],
-            latex_skeleton=out.get("latex_skeleton", ""),
+            latex_skeleton=canonical_skeleton,
         )
         return dec_node, plan

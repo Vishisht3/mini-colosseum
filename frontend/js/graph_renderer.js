@@ -39,7 +39,7 @@ class GraphRenderer {
 
   initSVG() {
     this.container.innerHTML = `
-      <svg class="graph-canvas" width="100%" height="100%" style="width:100%;height:100%;display:block;">
+      <svg class="graph-canvas" role="img" aria-label="Subproblem dependency graph. Start a run to create graph nodes." width="100%" height="100%" style="width:100%;height:100%;display:block;">
         <defs>
           <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
             <path d="M 0 1 L 9 5 L 0 9 z" fill="#666660"/>
@@ -93,6 +93,8 @@ class GraphRenderer {
       this.scale = newScale;
       this.updateTransform();
     });
+
+    this.render();
   }
 
   updateTransform() {
@@ -185,6 +187,15 @@ class GraphRenderer {
 
   render(options = {}) {
     const layoutRes = this.layoutEngine.layout(this.nodes, this.edges, options);
+
+    if (layoutRes.nodes.length === 0) {
+      this.edgesLayer.replaceChildren();
+      this.nodesLayer.innerHTML = `
+        <text class="graph-empty-title" x="50%" y="48%" text-anchor="middle">No proof graph yet</text>
+        <text class="graph-empty-copy" x="50%" y="48%" dy="1.8em" text-anchor="middle">Run the pipeline to map subproblems</text>
+      `;
+      return;
+    }
 
     // Render Edges
     let edgesHtml = "";

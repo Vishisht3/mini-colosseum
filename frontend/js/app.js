@@ -33,7 +33,7 @@ class MiniColosseumApp {
       hmed_records: [],
     };
     this.selectedNode = null;
-    this.activeTab = "doc";
+    this.activeTab = "dag";
     this.activeInspTab = "goals";
     this.filterSeverity = "all";
     this.filterSearchText = "";

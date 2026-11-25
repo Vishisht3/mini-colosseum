@@ -88,6 +88,7 @@ async def local_security_middleware(request: Request, call_next):
         path in ["/health", "/session", "/", "/index.html"]
         or path.startswith("/js/")
         or path.startswith("/css/")
+        or path.startswith("/assets/")
     ):
         return await call_next(request)
 

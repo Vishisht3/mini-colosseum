@@ -35,7 +35,7 @@ python3 -m pip install -r requirements.txt
 ## How to Use Mini-Colosseum (Step-by-Step)
 
 ### Step 1: Connect Your API Keys
-When you first open Mini-Colosseum (or click **`⚙ Keys`** in the toolbar), the **Connect your model providers** modal appears:
+On launch, provider states are shown in the top bar and the workspace remains browsable while offline. Click **`Keys`** in the toolbar (or **Tools → Key Configuration**) to open the **Connect your model providers** dialog:
 1. **Meta API Key (Required):** Paste your Meta key. When you click **Save & Connect**, the server verifies live access to both `muse-spark-1.3` and `muse-wonder-1.0`.
 2. **Baseten / Fireworks Keys (Optional):** Paste either key and check **Enable Baseten** or **Enable Fireworks** if you want Spark drafting/solving roles to try those providers first. If verification or any runtime call fails on Baseten or Fireworks, Mini-Colosseum automatically falls back to your Meta key without interrupting the run.
 3. Keys are stored in your **OS Keychain** (`keyring`) and are never written to SQLite databases, logs, or exported traces.
@@ -204,7 +204,10 @@ flowchart LR
 | [`backend/pipeline/verification.py`](backend/pipeline/verification.py) | Stage 5: Dual independent Wonder 1.0 global reviewers with DeepSeekMath-V2 verbatim quote verification (`>= 12` chars) |
 | [`backend/pipeline/continuation.py`](backend/pipeline/continuation.py) | Rebuilds a continuation seed from saved traces so interrupted runs resume only missing sections |
 | [`backend/pipeline/latex_utils.py`](backend/pipeline/latex_utils.py) | Deterministic JSON/LaTeX escape repair, truncated JSON field recovery, and Unicode-to-LaTeX sanitization |
-| [`frontend/index.html`](frontend/index.html) | Desktop/browser workbench UI layout, modals, and inspector tabs |
+| [`frontend/ocaml/main.ml`](frontend/ocaml/main.ml) | OCaml workbench shell and accessible dock-tab behavior, compiled to browser JavaScript with js_of_ocaml |
+| [`frontend/ocaml/build.sh`](frontend/ocaml/build.sh) | Rebuilds the browser bundle; install the OCaml dependencies from the adjacent opam manifest, then run `opam exec -- npm run build:ui` |
+| [`frontend/index.html`](frontend/index.html) | Desktop/browser workbench dialogs, menu, and application mount points |
+| [`frontend/js/ocaml-ui.js`](frontend/js/ocaml-ui.js) | Generated runtime bundle from the OCaml workbench shell |
 | [`frontend/js/app.js`](frontend/js/app.js) | Frontend controller, WebSocket event handler, replay engine, ledger, continuation, and export actions |
 | [`frontend/js/graph_renderer.js`](frontend/js/graph_renderer.js) | Interactive SVG renderer for the Research Tree and Proof DAG |
 | [`frontend/js/dagre_layout.js`](frontend/js/dagre_layout.js) | Hierarchical layered graph layout engine |

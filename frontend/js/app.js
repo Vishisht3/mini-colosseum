@@ -187,8 +187,9 @@ class MiniColosseumApp {
 
     // Keyboard shortcuts (Section 8: F5, F6, Shift+F5, Ctrl+Right/Left/End, Ctrl+R)
     window.addEventListener("keydown", (e) => {
-      if (e.key === "Escape" && document.getElementById("modal-first-run-setup")?.classList.contains("active")) {
+      if (e.key === "Escape") {
         e.preventDefault();
+        this.closeModals();
         return;
       }
       if (e.key === "F5" && !e.shiftKey) {
@@ -1456,16 +1457,13 @@ class MiniColosseumApp {
   }
 
   /**
-   * First-Run Key Setup check (FR8, Section 5.2, Section 9.5).
-   * Prompts user for API keys on software startup.
+   * Sync provider status at startup while keeping the workspace browsable offline.
+   * Users can open key setup from the Keys control when they are ready to connect.
    */
   async checkFirstRunKeySetup() {
     try {
       const res = await fetch("/api/settings");
-      if (!res.ok) {
-        this.showModal("modal-first-run-setup");
-        return;
-      }
+      if (!res.ok) return;
       const settings = await res.json();
       this.keysConfigured = Boolean(settings.api_key_set);
 
@@ -1510,13 +1508,9 @@ class MiniColosseumApp {
         fcb.checked = Boolean(settings.fireworks_fallback_enabled);
       }
 
-      if (!settings.api_key_set) {
-        this.showModal("modal-first-run-setup");
-      }
       this.updateKeySaveState();
     } catch (e) {
       console.warn("First run key setup check skipped:", e);
-      this.showModal("modal-first-run-setup");
     }
   }
 
@@ -1682,9 +1676,6 @@ class MiniColosseumApp {
   }
 
   closeModals() {
-    if (document.getElementById("modal-first-run-setup")?.classList.contains("active") && !this.keysConfigured) {
-      return;
-    }
     document.querySelectorAll(".modal-overlay").forEach((m) => m.classList.remove("active"));
   }
 

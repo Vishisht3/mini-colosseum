@@ -1,0 +1,7 @@
+opam-version: "2.0"
+synopsis: "OCaml UI shell for Mini-Colosseum"
+depends: [
+  "ocaml" {>= "5.2"}
+  "dune" {>= "3.20"}
+  "js_of_ocaml" {>= "5.7"}
+]

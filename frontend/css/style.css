@@ -3,6 +3,30 @@
  * Strictly functional, zero filler: every button and control is actively wired.
  */
 
+@font-face {
+  font-family: "Product Sans";
+  src: url("../assets/fonts/ProductSans-Regular.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Product Sans";
+  src: url("../assets/fonts/ProductSans-Medium.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Product Sans";
+  src: url("../assets/fonts/ProductSans-Bold.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+}
+
 :root {
   /* Classic GTK/CoqIDE grey palette */
   --coq-chrome-bg: #dedcd7;
@@ -1360,7 +1384,7 @@ svg text {
   --syntax-declaration: #a35336;
   --syntax-tactic: #40794d;
   --syntax-comment: #8e6b58;
-  --font-ui: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-ui: "Product Sans", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
 }
 

@@ -23,10 +23,11 @@ pytest.ini
 RESUME_CHECKPOINT.md
 handoff-*.md
 
-# Node & package build artifacts
+# Node, package, and OCaml build artifacts
 node_modules/
 dist/
 build/
+_build/
 
 # OS artifacts
 .DS_Store

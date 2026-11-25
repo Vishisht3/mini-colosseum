@@ -263,7 +263,7 @@ body {
   padding: 22px;
   border-radius: 7px;
   overflow: hidden;
-  background: linear-gradient(180deg, #07130dcc 0%, #0b1a13a8 42%, #07110ee8 100%), url("../assets/chalkboard-hero.png") center / cover;
+  background: linear-gradient(180deg, #07130dcc 0%, #0b1a13 42%, #07110e 100%);
   color: #f4f0df;
   box-shadow: 0 8px 24px #1e261d26;
 }
@@ -357,7 +357,7 @@ body {
 .reference-graph-surface .graph-viewport {
   min-height: 0;
   background-color: #eee7d7;
-  background-image: linear-gradient(#f5f1e2a8, #f5f1e2a8), url("../assets/roman-workspace.png");
+  background-image: linear-gradient(#f5f1e2, #f5f1e2);
   background-position: center;
   background-size: cover;
 }

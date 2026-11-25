@@ -1,27 +1,571 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#e8e6dd"><meta name="description" content="Mini-Colosseum mathematical proof workspace"><title>Mini-ColoIDE — Proof Workspace</title>
-<style>
-:root{--chrome:#e9e7df;--chrome2:#f1efe8;--line:#c9c7be;--ink:#292925;--muted:#77766f;--paper:#fffef9;--code:#292a28;--green:#69b879;--green-soft:#dcefdc;--amber:#dfa450;--blue:#88c8dd;--mono:ui-monospace,SFMono-Regular,Consolas,monospace;--sans:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}*{box-sizing:border-box}body{margin:0;height:100dvh;min-height:540px;overflow:hidden;background:var(--chrome);color:var(--ink);font-family:var(--sans);font-size:12px}button,input{font:inherit;color:inherit}.app{height:100%;display:grid;grid-template-rows:27px 32px 32px minmax(0,1fr) 22px;background:var(--chrome)}.titlebar{display:flex;align-items:center;justify-content:center;position:relative;background:#f3f1e9;border-bottom:1px solid #d4d1c8;color:#55534d;font-size:11px}.traffic{position:absolute;left:10px;display:flex;gap:6px}.traffic i{width:9px;height:9px;border-radius:50%;background:#da6b5f}.traffic i:nth-child(2){background:#e7bd55}.traffic i:nth-child(3){background:#67b56b}.top-actions{position:absolute;right:10px;display:flex;align-items:center;gap:8px}.top-actions button,.menubar button,.toolbar button,.pane-tab,.view-button{border:0;background:transparent;cursor:pointer}.top-actions .soft{padding:4px 9px;border:1px solid #d5d2c8;border-radius:5px;background:#f9f8f3;font-size:10px}.top-actions .connect{padding:5px 12px;border:0;border-radius:5px;background:#58a878;color:#fff;font-size:10px;font-weight:600}.menubar{display:flex;align-items:center;gap:18px;padding:0 14px;background:var(--chrome2);border-bottom:1px solid var(--line);color:#514f49}.menubar button{padding:2px 0;font-size:11px}.toolbar{display:flex;align-items:center;gap:5px;padding:3px 10px;border-bottom:1px solid var(--line);background:#eeece4;overflow:hidden;white-space:nowrap}.tool{height:23px;min-width:24px;padding:2px 7px;border:1px solid transparent!important;border-radius:3px;background:transparent}.tool:hover,.tool.active{background:#fffefb;border-color:#d0cec6!important}.tool-sep{height:18px;border-left:1px solid #c5c3bb;margin:0 3px}.toolbar .spacer{flex:1}.toolbar .budget{padding:4px 7px;border:1px solid #d7d4ca;border-radius:4px;background:#f8f7f1;color:#66645c;font-size:10px}.workarea{min-height:0;display:grid;grid-template-columns:38px minmax(250px,30%) minmax(390px,1fr) minmax(250px,25%);background:#dddbd2}.rail{display:flex;flex-direction:column;align-items:center;gap:8px;padding:9px 0;background:#eeece4;border-right:1px solid var(--line)}.rail button{width:30px;height:30px;border:0;border-radius:5px;background:transparent;color:#66645d;font-size:16px;cursor:pointer}.rail button:hover,.rail button.selected{background:#dedbd1;color:#333}.rail .bottom{margin-top:auto}.panel{min-width:0;min-height:0;display:flex;flex-direction:column;background:var(--paper);border-right:1px solid var(--line)}.panel-head{height:32px;flex:none;display:flex;align-items:center;gap:9px;padding:0 10px;background:#efede6;border-bottom:1px solid #d0cec6;color:#58564f}.panel-head strong{font-size:11px;font-weight:600}.panel-head .close{margin-left:auto;color:#84827b}.panel-head .live{color:#55a36f;font-weight:600}.tabbar{height:30px;flex:none;display:flex;align-items:stretch;background:#e8e6de;border-bottom:1px solid var(--line);overflow:hidden}.pane-tab{display:flex;align-items:center;gap:7px;padding:0 11px;border-right:1px solid #d4d2ca;color:#64625b;font-size:11px;white-space:nowrap}.pane-tab.active{background:var(--paper);color:#333;border-top:2px solid #6aa47a}.proof-pane{grid-column:2;grid-row:1;overflow:hidden}.proof-body{min-height:0;flex:1;display:flex;background:#fffefa}.proof-scroll{flex:1;min-width:0;overflow:auto;padding:12px 14px 24px 20px;font-family:Georgia,"Times New Roman",serif;font-size:13px;line-height:1.65;color:#393832}.proof-scroll h2{font-size:16px;text-align:center;font-weight:500;margin:5px 0 15px}.proof-scroll h3{font-size:13px;margin:15px 0 5px}.proof-scroll p{margin:8px 0}.proof-scroll .equation{text-align:center;margin:14px 0;font-size:15px}.proof-scroll .marked{padding:4px 7px;background:#e5f4e1;border-left:3px solid #71ad78}.proof-scroll .stale{background:#fff0d8;border-left-color:#d49b4f}.proof-scroll .page-no{text-align:center;color:#aaa;margin:18px}.proof-scroll aside{width:50px;float:right;margin:0 0 8px 12px;color:#aaa;font-size:9px}.proof-controls{display:flex;align-items:center;gap:6px;padding:6px 8px;border-top:1px solid #ddd9ce;background:#f6f4ed}.proof-controls button{border:1px solid #d0cdc3;border-radius:3px;background:#fffef9;padding:4px 7px;font-size:10px;cursor:pointer}.proof-controls span{margin-left:auto;color:#77746c;font-size:10px}.center{grid-column:3;grid-row:1;display:grid;grid-template-rows:minmax(220px,1.1fr) 5px minmax(180px,.9fr);min-width:0;min-height:0}.dag-pane{min-height:0;display:flex;flex-direction:column}.dag-canvas{position:relative;flex:1;min-height:0;overflow:hidden;background:radial-gradient(ellipse at 53% 27%,#fffefb 0,#f3f1e8 72%,#eeece4 100%)}.dag-canvas svg{width:100%;height:100%;display:block}.edge{fill:none;stroke:#aaa79e;stroke-width:1.5}.node rect{stroke:#bcb9ae;stroke-width:1.2;filter:drop-shadow(0 2px 2px #00000012)}.node text{font-family:var(--sans);font-size:10px;text-anchor:middle;fill:#33322e}.node .sub{font-size:8px;fill:#77736a}.node.green rect{fill:#bfe2bb}.node.amber rect{fill:#f1d39e}.node.blue rect{fill:#c8e7f1}.node.gray rect{fill:#efede5}.node.selected rect{stroke:#549568;stroke-width:2.5}.node circle{fill:#fff;border:1px solid #aaa}.dag-controls{position:absolute;right:9px;bottom:8px;display:flex;align-items:center;gap:4px;padding:4px 7px;border:1px solid #d9d6cc;border-radius:5px;background:#fffdf8dd;box-shadow:0 1px 3px #00000010}.dag-controls button{border:0;background:none;cursor:pointer;color:#65635c}.dag-controls .zoom{color:#888}.splitter{background:#d2d0c7;border-top:1px solid #fff;cursor:row-resize;position:relative}.splitter:after{content:"······";position:absolute;left:50%;top:-4px;transform:translateX(-50%);color:#aaa79e;letter-spacing:2px;background:#d2d0c7;padding:0 6px}.ledger{min-height:0;display:flex;flex-direction:column;background:#f9f8f2}.ledger-toolbar{height:40px;display:flex;align-items:center;gap:8px;padding:0 10px;border-bottom:1px solid #d4d1c8;background:#f3f1e9}.ledger-toolbar label{font-size:10px;color:#625f58}.ledger-toolbar select,.ledger-toolbar button{height:25px;padding:0 7px;border:1px solid #d5d2c7;border-radius:3px;background:#fffef9;font-size:10px}.ledger-toolbar .grow{flex:1}.ledger-table-wrap{min-height:0;overflow:auto;flex:1}.ledger-table{width:100%;border-collapse:collapse;table-layout:auto;font-size:11px}.ledger-table th{position:sticky;top:0;z-index:1;background:#f0eee7;color:#55534c;text-align:left;font-weight:600;padding:7px 9px;border-bottom:1px solid #d1cec4}.ledger-table td{padding:6px 9px;border-bottom:1px solid #e8e6de;white-space:nowrap;color:#47453f}.ledger-table tr:hover td{background:#f1f5eb}.ledger-table .step{width:52px;color:#77746d}.ledger-table .stage{width:96px}.ledger-table .model{max-width:220px;overflow:hidden;text-overflow:ellipsis}.costbar{display:flex;align-items:center;gap:8px}.costbar i{display:block;height:15px;min-width:4px;background:#63ab73;border-radius:1px}.costbar span{font-variant-numeric:tabular-nums}.infoview{grid-column:4;grid-row:1;min-height:0;display:flex;flex-direction:column;background:#fffefa}.info-tabs{height:34px;flex:none;display:flex;padding:4px 8px;gap:4px;border-bottom:1px solid #d5d2ca;background:#f1efe8}.info-tabs button{flex:1;border:0;border-radius:4px;background:transparent;color:#77746c;font-size:10px;cursor:pointer}.info-tabs button.active{background:#fff;box-shadow:0 1px 3px #00000014;color:#333}.infoview-content{flex:1;min-height:0;overflow:auto;padding:10px 12px 25px;font-size:11px}.info-label{font-size:10px;color:#77746c;margin-bottom:8px}.info-file{font-weight:600;margin:3px 0}.section-label{margin:12px -4px 7px;padding:5px 4px;border-bottom:1px solid #d9d6cc;font-weight:600;color:#44423d}.goal{font-weight:700;margin-bottom:7px}.context{display:grid;grid-template-columns:auto 1fr;gap:4px 7px;font-family:var(--mono);font-size:10px;line-height:1.45}.context .key{font-weight:650;color:#34332e}.context .value{color:#58564e;overflow-wrap:anywhere}.context .dim{color:#79766e;font-style:italic}.term{padding-left:12px;color:#4f4c45;line-height:1.55;overflow-wrap:anywhere}.statusbar{display:flex;align-items:center;gap:10px;padding:0 9px;background:#e9e7df;border-top:1px solid #ccc9c0;color:#68665f;font-size:10px;white-space:nowrap}.statusbar .ready{color:#4f9865;font-weight:600}.statusbar .fill{flex:1}.overlay{display:none;position:absolute;inset:0;z-index:20;align-items:center;justify-content:center;background:#24221db3}.overlay.open{display:flex}.dialog{width:min(560px,90vw);max-height:80vh;overflow:auto;border:1px solid #bebaad;border-radius:7px;background:#fbfaf5;box-shadow:0 12px 40px #0004}.dialog-head{display:flex;align-items:center;justify-content:space-between;padding:11px 14px;border-bottom:1px solid #ddd9ce;font-weight:650}.dialog-body{padding:16px}.dialog-body p{color:#6a675f;line-height:1.5}.dialog-body textarea{width:100%;min-height:120px;padding:9px;border:1px solid #cbc8bd;border-radius:4px;background:#fffefb;font:12px var(--mono)}.dialog-foot{display:flex;justify-content:flex-end;gap:8px;padding:10px 14px;border-top:1px solid #ddd9ce}.dialog-foot button{padding:6px 10px;border:1px solid #d0cdc3;border-radius:4px;background:#fff;cursor:pointer}.dialog-foot .primary{background:#5b9b6c;color:white;border-color:#5b9b6c}.mobile-menu{display:none}
-@media(max-width:1050px){.workarea{grid-template-columns:34px minmax(210px,28%) minmax(330px,1fr) minmax(220px,26%)}.menubar{gap:12px}.toolbar .hide-mid{display:none}.context{font-size:9px}.proof-scroll{padding:10px;font-size:12px}}
-@media(max-width:760px){body{min-height:0}.app{grid-template-rows:28px 32px 32px minmax(0,1fr) 22px}.titlebar{justify-content:flex-start;padding-left:62px}.titlebar .top-actions .soft,.top-actions .help{display:none}.menubar{gap:0;justify-content:space-between;padding:0 9px}.menubar button:nth-child(n+5){display:none}.toolbar{padding:3px 6px}.toolbar .hide-small,.toolbar .budget{display:none}.workarea{grid-template-columns:30px minmax(0,1fr) 0}.rail{grid-column:1}.proof-pane{display:none}.center{grid-column:2;grid-row:1;grid-template-rows:minmax(190px,1fr) 5px minmax(155px,.8fr)}.infoview{display:none}.ledger-table{font-size:10px}.ledger-table td,.ledger-table th{padding:6px 5px}.ledger-table .model{max-width:125px}.statusbar{gap:6px}.statusbar .hide-small{display:none}.mobile-menu{display:inline-flex;position:absolute;right:7px;top:35px;z-index:5;border:1px solid #d5d2ca;border-radius:4px;background:#fff;padding:4px 8px;font-size:10px}}
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mini-Colosseum - Live Proof Workspace</title>
+  <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-<div class="app" id="app">
-<header class="titlebar"><span class="traffic" aria-hidden="true"><i></i><i></i><i></i></span><span>Mini-ColoIDE — Electronwave (0) (Saved)</span><div class="top-actions"><button class="soft" type="button" data-dialog="draft">Draft estimates</button><button class="connect" type="button" data-dialog="sources">Get Sources</button><button class="help" type="button" aria-label="Help">?</button><button class="help" type="button" aria-label="Account">●</button></div></header>
-<nav class="menubar" aria-label="Application menu"><button>File</button><button>Edit</button><button>View</button><button>Tools</button><button>Design</button><button>Topic</button><button>Window</button><button>Help</button></nav>
-<div class="toolbar" role="toolbar" aria-label="Proof actions"><button class="tool" aria-label="New file">▧</button><button class="tool" aria-label="Open file">▱</button><button class="tool" aria-label="Save">▣</button><button class="tool" aria-label="Print">▤</button><span class="tool-sep"></span><button class="tool" aria-label="Undo">↶</button><button class="tool" aria-label="Redo">↷</button><span class="tool-sep"></span><button class="tool" data-view="source">▤</button><button class="tool" data-view="dag">⌘</button><button class="tool" data-view="ledger">▦</button><span class="tool-sep"></span><button class="tool" data-dialog="run">▶ Run</button><button class="tool hide-mid" data-dialog="run">⏭ Step</button><button class="tool hide-mid">Ⅱ Pause</button><button class="tool hide-small">↻ Re-explore</button><span class="spacer"></span><span class="budget">Budget&nbsp; $7.00</span><span class="budget">Spend&nbsp; $0.42</span></div>
-<main class="workarea">
-<nav class="rail" aria-label="Workspace navigation"><button class="selected" title="Proof pane" aria-label="Proof pane">▤</button><button title="Search" aria-label="Search">⌕</button><button title="Subproblem graph" aria-label="Subproblem graph">⌘</button><button title="Assets" aria-label="Assets">▦</button><button title="Run history" aria-label="Run history">◷</button><button class="bottom" title="Settings" aria-label="Settings">⚙</button></nav>
-<section class="panel proof-pane" aria-label="Proof and source files"><div class="tabbar"><button class="pane-tab active" data-pane="proof">Proof Pane <span>×</span></button><button class="pane-tab" data-pane="source">LaTeX Proof Viewer</button></div><div class="panel-head"><strong>Gradient Descent: Strong Convexity</strong><span class="close">⌄</span></div><div class="proof-body"><div class="proof-scroll" id="proofScroll"><aside>1. Introduction<br>2. Main result<br>3. Proof<br>4. References</aside><h2>Convergence of Gradient Descent</h2><p><b>Proposition 3.4.</b> Let <i>f</i> be differentiable and strongly convex with parameter <i>m</i> &gt; 0. Assume that its gradient is Lipschitz continuous with constant <i>L</i>.</p><p>For any initial point <i>x</i><sub>0</sub> and step size η ∈ (0, 2/L), the sequence generated by gradient descent converges to the unique minimizer.</p><div class="equation">‖x<sub>k</sub> − x*‖² ≤ (1 − ηm)<sup>k</sup> ‖x<sub>0</sub> − x*‖²</div><p class="marked">Proof. By strong convexity and the descent lemma, we have the following estimate for every iteration:</p><div class="equation">f(x<sub>k+1</sub>) − f(x*) ≤ ⟨∇f(x<sub>k</sub>), x<sub>k</sub> − x*⟩ − <span style="color:#528b60">m</span>/2 ‖x<sub>k</sub> − x*‖²</div><p>The first-order optimality condition gives ∇f(x*) = 0. Applying the three-point identity to the inner product yields:</p><div class="equation">2η⟨∇f(x<sub>k</sub>), x<sub>k</sub> − x*⟩ = ‖x<sub>k</sub> − x*‖² − ‖x<sub>k+1</sub> − x*‖² + η²‖∇f(x<sub>k</sub>)‖²</div><p class="marked stale">Stale node. This argument changed after the latest re-exploration; inspect the dependent subproblems.</p><p>Combining the inequalities and choosing η = 1/L gives the claimed contraction factor.</p><div class="page-no">— 12 —</div></div></div><div class="proof-controls"><button type="button">◀</button><button type="button">▶</button><button type="button">−</button><button type="button">＋</button><span>Page 12 of 26 · 110%</span></div></section>
-<section class="center" aria-label="Research graph and cost ledger"><section class="panel dag-pane"><div class="tabbar"><button class="pane-tab active">Subproblem DAG — Baseten <span class="live">● ACTIVE</span></button><button class="pane-tab">Research Map</button><button class="pane-tab">Proof Script</button></div><div class="dag-canvas"><svg viewBox="0 0 720 350" role="img" aria-label="Subproblem dependency graph with accepted, active, and pending proof nodes"><defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#aaa79e"/></marker></defs><path class="edge" marker-end="url(#arrow)" d="M356 44 L165 104 M356 44 L356 104 M356 44 L554 104 M165 145 L87 207 M165 145 L245 207 M356 145 L295 207 M356 145 L415 207 M554 145 L492 207 M554 145 L630 207 M87 248 L54 300 M87 248 L137 300 M295 248 L260 300 M415 248 L448 300 M492 248 L492 300"/><g class="node green"><rect x="286" y="14" width="140" height="46" rx="22"/><text x="356" y="33">Accepted</text><text class="sub" x="356" y="48">subproblem 1.0</text><text x="356" y="35">✓</text></g><g class="node gray"><rect x="105" y="103" width="120" height="43" rx="21"/><text x="165" y="122">Baseline</text><text class="sub" x="165" y="136">muse-wonder-1.0</text></g><g class="node green selected"><rect x="296" y="103" width="120" height="43" rx="21"/><text x="356" y="122">Wonder</text><text class="sub" x="356" y="136">subproblem 1.0</text></g><g class="node amber"><rect x="494" y="103" width="120" height="43" rx="21"/><text x="554" y="122">Running</text><text class="sub" x="554" y="136">subproblems</text></g><g class="node green"><rect x="30" y="206" width="114" height="43" rx="21"/><text x="87" y="225">Exact-quote</text><text class="sub" x="87" y="239">subproblem</text></g><g class="node blue"><rect x="188" y="206" width="114" height="43" rx="21"/><text x="245" y="225">Falsification</text><text class="sub" x="245" y="239">subproblem</text></g><g class="node amber"><rect x="238" y="206" width="114" height="43" rx="21"/><text x="295" y="225">Meta review</text><text class="sub" x="295" y="239">queued</text></g><g class="node green"><rect x="358" y="206" width="114" height="43" rx="21"/><text x="415" y="225">Verifier</text><text class="sub" x="415" y="239">accepted</text></g><g class="node gray"><rect x="435" y="206" width="114" height="43" rx="21"/><text x="492" y="225">Stale node</text><text class="sub" x="492" y="239">re-explore</text></g><g class="node blue"><rect x="573" y="206" width="114" height="43" rx="21"/><text x="630" y="225">Meta</text><text class="sub" x="630" y="239">dependents 1.0</text></g><g class="node green"><rect x="15" y="299" width="78" height="38" rx="19"/><text x="54" y="323">✓ done</text></g><g class="node green"><rect x="98" y="299" width="78" height="38" rx="19"/><text x="137" y="323">✓ done</text></g><g class="node amber"><rect x="221" y="299" width="78" height="38" rx="19"/><text x="260" y="323">+ review</text></g><g class="node blue"><rect x="409" y="299" width="78" height="38" rx="19"/><text x="448" y="323">awaiting</text></g><g class="node gray"><rect x="453" y="299" width="78" height="38" rx="19"/><text x="492" y="323">stale</text></g></svg><div class="dag-controls"><button aria-label="Fit graph">⌗</button><button class="zoom" aria-label="Zoom out">−</button><span>100%</span><button aria-label="Zoom in">＋</button></div></div></section><div class="splitter" role="separator" aria-label="Resize graph and ledger"></div><section class="panel ledger" aria-label="Asset ledger"><div class="tabbar"><button class="pane-tab active">Asset ledger <span>×</span></button><button class="pane-tab">Model API</button><span class="spacer"></span><button class="pane-tab" aria-label="Close ledger">×</button></div><div class="ledger-toolbar"><label>Budget:</label><select aria-label="Budget filter"><option>File</option><option>Run</option><option>All</option></select><select aria-label="Ledger filter"><option>Search from state</option><option>All steps</option></select><span class="grow"></span><button type="button">Refresh costs</button><button type="button" aria-label="Search ledger">⌕</button></div><div class="ledger-table-wrap"><table class="ledger-table"><thead><tr><th class="step">Step</th><th class="stage">Stage</th><th>Node ID</th><th>Model name</th><th>Accurate Cost</th><th>Share of run</th></tr></thead><tbody><tr><td class="step">1</td><td class="stage">Baseten</td><td>1390</td><td class="model">Meta_2021_decenet_droset/Runner6504…</td><td>$0.385</td><td><div class="costbar"><i style="width:86%"></i><span>86%</span></div></td></tr><tr><td class="step">2</td><td class="stage">Meta 1</td><td>1325</td><td class="model">Meta_2021_decenet_1026t=1.00</td><td>$0.131</td><td><div class="costbar"><i style="width:68%"></i><span>68%</span></div></td></tr><tr><td class="step">3</td><td class="stage">Meta 2</td><td>1326</td><td class="model">Meta_2021_decenet_1066t=1.00</td><td>$0.098</td><td><div class="costbar"><i style="width:57%"></i><span>57%</span></div></td></tr><tr><td class="step">4</td><td class="stage">Meta 3</td><td>1388</td><td class="model">Meta_2021_decenet_Znse383188808283</td><td>$0.041</td><td><div class="costbar"><i style="width:34%"></i><span>34%</span></div></td></tr><tr><td class="step">5</td><td class="stage">Meta 4</td><td>1390</td><td class="model">Meta_2021_decenet_240656235838864…</td><td>$0.029</td><td><div class="costbar"><i style="width:25%"></i><span>25%</span></div></td></tr><tr><td class="step">6</td><td class="stage">Meta 5</td><td>1392</td><td class="model">Meta_2021_decenet_Znse41293084433</td><td>$0.018</td><td><div class="costbar"><i style="width:16%"></i><span>16%</span></div></td></tr><tr><td class="step">7</td><td class="stage">Meta 6</td><td>1347</td><td class="model">Meta_2021_IFDAEE: 2887</td><td>$0.012</td><td><div class="costbar"><i style="width:11%"></i><span>11%</span></div></td></tr><tr><td class="step">8</td><td class="stage">Meta 7</td><td>1330</td><td class="model">Meta_2021_decenet_Znse565556084598</td><td>$0.009</td><td><div class="costbar"><i style="width:8%"></i><span>8%</span></div></td></tr></tbody></table></div></section></section>
-<aside class="panel infoview" aria-label="Proof state"><div class="info-tabs"><button class="active" data-info="state">Infoview</button><button data-info="search">Search</button></div><div class="infoview-content" id="infoviewContent"><div class="info-label">Lean Infoview</div><div class="info-file">▾ GradientDescentStronglyConvex.lean:72:13</div><div class="section-label">▾ Tactic state</div><div class="goal">1 goal</div><div class="context"><span class="key">E</span><span class="value">: Type u_1</span><span class="dim">inst†²</span><span class="value">: NormedAddCommGroup E</span><span class="dim">inst†¹</span><span class="value">: InnerProductSpace ℝ E</span><span class="dim">inst†</span><span class="value">: CompleteSpace E</span><span class="key">f</span><span class="value">: E → ℝ</span><span class="key">m</span><span class="value">: ℝ</span><span class="key">f'</span><span class="value">: E → E</span><span class="key">x y</span><span class="value">: E</span><span class="key">l</span><span class="value">: ℝ</span><span class="key">mp</span><span class="value">: m &gt; 0</span><span class="key">hf</span><span class="value">: ∀ (x : E), HasGradientAt f (f' x) x</span><span class="key">h₂</span><span class="value">: LipschitzWith l f'</span><span class="key">hl</span><span class="value">: l &gt; 0</span></div><div class="section-label">Goal</div><div class="term">inner (u - m * v) v ≥ 1 / (l - m) * ‖u - m * v‖²</div><div class="section-label">Local context</div><div class="term">conv : ConvexOn ℝ univ<br>hsc : StrongConvexOn ℝ univ f m</div></div></aside>
-<button class="mobile-menu" type="button" id="mobileInfo">Open Infoview</button>
-</main><footer class="statusbar"><span class="ready">● Ready</span><span>Run 04</span><span>Calls: 18</span><span>1.8k tokens</span><span class="hide-small">Meta: $0.42 / $7.00</span><span class="fill"></span><span>Ln 72, Col 13</span><span class="hide-small">Lean 4 · 100%</span></footer>
-<div class="overlay" id="dialogOverlay" role="dialog" aria-modal="true" aria-labelledby="dialogTitle"><section class="dialog"><header class="dialog-head"><span id="dialogTitle">New proof run</span><button type="button" id="closeDialog" aria-label="Close">×</button></header><div class="dialog-body"><p id="dialogCopy">Start a fresh mathematical proof run or refine the current conjecture.</p><textarea aria-label="Problem statement" placeholder="Enter a problem statement…"></textarea></div><footer class="dialog-foot"><button type="button" id="cancelDialog">Cancel</button><button type="button" class="primary" id="confirmDialog">Start run</button></footer></section></div>
-<script>
-const overlay=document.getElementById('dialogOverlay');const title=document.getElementById('dialogTitle');const copy=document.getElementById('dialogCopy');function openDialog(kind){const content={run:['New proof run','Enter a problem statement to begin a new run.'],draft:['Draft estimates','Estimated run cost is based on the active model routing and current budget.'],sources:['Connect model sources','Choose a configured model source for the next proof run.']}[kind]||['New proof run','Enter a problem statement to begin a new run.'];title.textContent=content[0];copy.textContent=content[1];overlay.classList.add('open')}document.querySelectorAll('[data-dialog]').forEach(button=>button.addEventListener('click',()=>openDialog(button.dataset.dialog)));['closeDialog','cancelDialog'].forEach(id=>document.getElementById(id).addEventListener('click',()=>overlay.classList.remove('open')));overlay.addEventListener('click',event=>{if(event.target===overlay)overlay.classList.remove('open')});document.addEventListener('keydown',event=>{if(event.key==='Escape')overlay.classList.remove('open')});document.querySelectorAll('[data-info]').forEach(button=>button.addEventListener('click',()=>{document.querySelectorAll('[data-info]').forEach(item=>item.classList.toggle('active',item===button));const panel=document.getElementById('infoviewContent');if(button.dataset.info==='search'){panel.innerHTML='<label class="info-label" for="searchInput">Search declarations</label><input id="searchInput" type="search" placeholder="Search Lean library…" style="width:100%;padding:8px;border:1px solid #cbc8bd;border-radius:4px;background:#fffefb"><p class="info-label" style="margin-top:10px">Search results appear here.</p>'}else{location.reload()}}));document.querySelectorAll('[data-view]').forEach(button=>button.addEventListener('click',()=>{document.querySelectorAll('[data-view]').forEach(item=>item.classList.toggle('active',item===button));const target=button.dataset.view;if(target==='ledger')document.querySelector('.ledger').scrollIntoView({block:'nearest'});if(target==='dag')document.querySelector('.dag-pane').scrollIntoView({block:'nearest'});if(target==='source')document.querySelector('.proof-pane').scrollIntoView({block:'nearest'})}));document.getElementById('mobileInfo').addEventListener('click',()=>{const panel=document.querySelector('.infoview');panel.style.display=panel.style.display==='flex'?'none':'flex'});document.getElementById('confirmDialog').addEventListener('click',()=>{overlay.classList.remove('open');document.querySelector('.statusbar .ready').textContent='● Run queued'});
-</script>
-</div></body></html>
+  <div id="app-container">
+    <!-- Functional Menu Bar -->
+    <div class="menu-bar">
+      <div class="menu-item" id="menu-file">
+        File
+        <div class="dropdown-menu">
+          <div class="dropdown-item" id="menu-new-run" onclick="window.app.showModal('modal-run-setup')">New Run / Custom Problem... <span>Ctrl+N</span></div>
+          <div class="dropdown-item" id="menu-open-file" onclick="window.app.showModal('modal-run-setup')">Problem statement... <span>Ctrl+N</span></div>
+          <div class="dropdown-item" id="menu-open-history" onclick="window.app.openRunHistoryModal()">Previous Runs... <span>Ctrl+O</span></div>
+          <div class="dropdown-item" onclick="window.app.exportSelected('ledger.csv')">Save Ledger</div>
+          <div class="dropdown-divider"></div>
+          <div class="dropdown-item" id="menu-quit" onclick="window.app.quit()">Quit</div>
+        </div>
+      </div>
+      <div class="menu-item" id="menu-execution">
+        Execution
+        <div class="dropdown-menu">
+          <div class="dropdown-item" onclick="window.app.handleRunAll()">Run Full Pipeline <span>Ctrl+R</span></div>
+          <div class="dropdown-item" onclick="window.app.stepForward()">Step Forward (One Node/Stage) <span>Ctrl+Down</span></div>
+          <div class="dropdown-item" onclick="window.app.handlePause()">Pause Execution <span>Ctrl+Up</span></div>
+          <div class="dropdown-item" onclick="window.app.handleStop()">Interrupt / Stop <span>Ctrl+C</span></div>
+          <div class="dropdown-divider"></div>
+          <div class="dropdown-item" onclick="window.app.triggerReexplore()">Trigger Re-exploration Round <span>Ctrl+E</span></div>
+        </div>
+      </div>
+      <div class="menu-item" id="menu-display">
+        View
+        <div class="dropdown-menu">
+          <div class="dropdown-item" onclick="window.app.switchTab('doc')">Proof Script (proof.v)</div>
+          <div class="dropdown-item" onclick="window.app.switchTab('tree')">Research Tree View</div>
+          <div class="dropdown-item" onclick="window.app.switchTab('dag')">Proof DAG View</div>
+          <div class="dropdown-divider"></div>
+          <div class="dropdown-item" onclick="window.app.treeRenderer.fitToScreen()">Fit Research Tree</div>
+          <div class="dropdown-item" onclick="window.app.dagRenderer.fitToScreen()">Fit Proof DAG</div>
+        </div>
+      </div>
+      <div class="menu-item" id="menu-tools">
+        Tools
+        <div class="dropdown-menu">
+          <div class="dropdown-item" onclick="window.app.showModal('modal-first-run-setup')">Key Configuration...</div>
+          <div class="dropdown-item" onclick="window.app.openSettingsModal()">Settings &amp; Model Routing...</div>
+          <div class="dropdown-divider"></div>
+          <div class="dropdown-item" id="menu-help-about">About Mini-Colosseum v2.0...</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="reference-toolbar">
+      <input class="reference-input conjecture-input" id="toolbar-problem-title" placeholder="Problem statement (maths or CS)">
+      <span class="reference-provider" id="reference-provider">Meta <b>[OFFLINE]</b> · Baseten <b>[OFFLINE]</b> · Fireworks <b>[OFFLINE]</b></span>
+      <span class="reference-spend" id="reference-spend">SPEND: $0.00 / $7.00</span>
+    </div>
+
+    <!-- Highly Functional Toolbar: Zero Filler -->
+    <div class="toolbar legacy-toolbar">
+      <!-- Direct Pipeline Execution Controls -->
+      <button class="btn-tool primary-action" data-run-command id="btn-run-all" onclick="window.app.handleRunAll()" title="Run Complete Pipeline (F5 / Ctrl+R)">
+        <strong>Run All</strong>
+      </button>
+      <button class="btn-tool" id="btn-step-fwd" onclick="window.app.stepForward()" title="Step Forward one node/stage (Ctrl+Right / Ctrl+Down)">
+        Step
+      </button>
+      <button class="btn-tool" id="btn-step-back" onclick="window.app.stepBack()" title="Step Back in Replay (Ctrl+Left)">
+        Back
+      </button>
+      <button class="btn-tool" id="btn-run-end" onclick="window.app.runToEnd()" title="Run Replay to End (Ctrl+End)">
+        End
+      </button>
+      <button class="btn-tool" data-run-command id="btn-pause-exec" onclick="window.app.handlePause()" title="Pause live run (F6 / Ctrl+Up)">
+        Pause
+      </button>
+      <button class="btn-tool" data-run-command id="btn-stop-exec" onclick="window.app.handleStop()" title="Stop / Interrupt (Shift+F5 / Ctrl+C)">
+        Stop
+      </button>
+      <button class="btn-tool" data-run-command onclick="window.app.triggerReexplore()" title="Trigger Re-exploration round with critique feedback (Ctrl+E / Ctrl+R)">
+        Re-explore
+      </button>
+
+      <div class="toolbar-separator"></div>
+
+      <div class="toolbar-separator"></div>
+
+      <!-- Instant View Switcher Buttons -->
+      <button class="btn-tool" id="btn-view-doc" onclick="window.app.switchTab('doc')" title="View Proof Script (proof.v)">
+        <strong>Script</strong>
+      </button>
+      <button class="btn-tool" id="btn-view-tree" onclick="window.app.switchTab('tree')" title="View Research Tree">
+        <strong>Research Map</strong>
+      </button>
+      <button class="btn-tool" id="btn-view-dag" onclick="window.app.switchTab('dag')" title="View Proof DAG">
+        <strong>Subproblem DAG</strong>
+      </button>
+
+      <div class="toolbar-separator"></div>
+
+      <!-- Problem, ledger, and export controls -->
+      <button class="btn-tool" onclick="window.app.showModal('modal-run-setup')" title="Problem statement">
+        Problem
+      </button>
+      <button class="btn-tool" onclick="window.app.openLedger()" title="Open cost ledger">
+        Ledger
+      </button>
+      <label class="toolbar-label" for="export-select">Export:</label>
+      <select id="export-select" class="toolbar-select" onchange="window.app.exportSelected(this.value)">
+        <option value="">Choose...</option>
+        <option value="latex">Proof (LaTeX)</option>
+        <option value="markdown">Report (Markdown)</option>
+        <option value="ledger.csv">Ledger (CSV)</option>
+        <option value="json">Run trace (JSON)</option>
+      </select>
+      <button class="btn-tool" onclick="window.app.openRunHistoryModal()" title="Previous Runs">
+        History
+      </button>
+      <button class="btn-tool" onclick="window.app.showModal('modal-first-run-setup')" title="Key Configuration">
+        Keys
+      </button>
+    </div>
+
+    <!-- Main Workspace -->
+    <div class="main-workspace">
+      <!-- Left Pane: Coq Script / Tabs -->
+      <div class="pane left-pane" id="left-pane">
+        <!-- Notebook Tab Bar: Research Tree is Primary & Default Active -->
+        <div class="tab-strip">
+          <div class="tab-btn" id="tab-btn-tree" data-tab="tree" onclick="window.app.switchTab('tree')">
+            <span class="tab-status-dot"></span>
+            <span>Research Map</span>
+          </div>
+          <div class="tab-btn active" id="tab-btn-dag" data-tab="dag" onclick="window.app.switchTab('dag')">
+            <span>Subproblem DAG</span>
+          </div>
+          <div class="tab-btn" id="tab-btn-doc" data-tab="doc" onclick="window.app.switchTab('doc')">
+            <span>proof.v · Proof document</span>
+          </div>
+        </div>
+
+        <!-- Sunken Frame containing active view -->
+        <div class="sunken-frame">
+          <!-- Research Tree Tab (Active by Default) -->
+          <div class="tab-content" id="tab-tree">
+            <div class="graph-viewport" id="tree-canvas-container"></div>
+            <div class="graph-controls">
+              <button class="btn-graph-ctl" id="btn-fit-tree" onclick="window.app.treeRenderer.fitToScreen()" title="Fit to Screen">Fit</button>
+              <button class="btn-graph-ctl" id="btn-reset-tree" onclick="window.app.treeRenderer.resetZoom()" title="Reset Zoom">1:1</button>
+            </div>
+          </div>
+
+          <!-- Proof DAG Tab -->
+          <div class="tab-content active" id="tab-dag">
+            <div class="graph-viewport" id="dag-canvas-container"></div>
+            <div class="graph-controls">
+              <button class="btn-graph-ctl" id="btn-fit-dag" onclick="window.app.dagRenderer.fitToScreen()" title="Fit to Screen">Fit</button>
+              <button class="btn-graph-ctl" id="btn-reset-dag" onclick="window.app.dagRenderer.resetZoom()" title="Reset Zoom">1:1</button>
+            </div>
+          </div>
+
+          <!-- Document / Coq Script View with Gutter Line Numbers -->
+          <div class="tab-content" id="tab-doc">
+            <div class="editor-layout">
+              <div class="gutter-lines" id="editor-gutter">1</div>
+              <div class="coq-script-editor" id="document-content" contenteditable="false">
+                <!-- Dynamically populated with the assembled proof -->
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Resizer Horizontal Divider with grip -->
+      <div class="resizer-x" id="resizer-x"></div>
+
+      <!-- Persistent proof preview -->
+      <div class="pane preview-pane" id="preview-pane">
+        <div class="pane-titlebar">
+          <strong>Proof preview</strong>
+        </div>
+        <div class="preview-content" id="live-preview-content">
+          <div class="preview-problem" id="preview-problem">No proof text yet.</div>
+        </div>
+      </div>
+
+      <div class="resizer-x" id="resizer-preview"></div>
+
+      <!-- Right Pane: Subgoals & Goals Inspector (Top) and Messages & Event Log (Bottom) -->
+      <div class="pane right-pane" id="right-pane">
+        <!-- Top Pane: Interactive Goals & Inspector -->
+        <div class="sunken-frame" id="inspector-container" style="flex: 1.25;">
+          <!-- Tabbed Inspector View -->
+          <div class="subgoal-tabs-bar">
+            <div class="subgoal-tab active" id="tab-insp-goals" onclick="window.app.switchInspectorTab('goals')">Sections</div>
+            <div class="subgoal-tab" id="tab-insp-details" onclick="window.app.switchInspectorTab('details')">Details</div>
+            <div class="subgoal-tab" id="tab-insp-falsifier" onclick="window.app.switchInspectorTab('falsifier')">Review</div>
+            <div class="subgoal-tab" id="tab-insp-verifier" onclick="window.app.switchInspectorTab('verifier')">Verification</div>
+            <div class="subgoal-tab" id="tab-insp-hmed" onclick="window.app.switchInspectorTab('hmed')">Revision History</div>
+            <div class="subgoal-tab" id="tab-insp-knowledge" onclick="window.app.switchInspectorTab('knowledge')">Reference Notes</div>
+          </div>
+
+          <div class="coq-goals-pane" id="coq-goals-container">
+            <!-- View 1: Active Subgoals (4 Subgoals Structure) -->
+            <div id="view-insp-goals">
+              <div class="coq-goals-header" id="coq-subgoals-count">No section selected</div>
+
+              <div class="coq-hypotheses" id="coq-hypotheses-text">No section selected yet. Run the proof engine or select a node to inspect it.</div>
+
+              <div class="coq-subgoal-line">
+                <span class="coq-subgoal-tag" id="tag-subgoal-1">(1/4) Problem target</span>
+              </div>
+              <div class="coq-goal-target" id="target-subgoal-1" title="Click to open">No problem target yet.</div>
+
+              <div class="coq-subgoal-line">
+                <span class="coq-subgoal-tag" id="tag-subgoal-2">(2/4) Proposed approach</span>
+              </div>
+              <div class="coq-goal-target" id="target-subgoal-2" title="Click to open">No proposed approach yet.</div>
+
+              <div class="coq-subgoal-line">
+                <span class="coq-subgoal-tag" id="tag-subgoal-3">(3/4) Review result</span>
+              </div>
+              <div class="coq-goal-target" id="target-subgoal-3" title="Click to open" style="color:#781716;">No review result yet.</div>
+
+              <div class="coq-subgoal-line">
+                <span class="coq-subgoal-tag" id="tag-subgoal-4">(4/4) Open issues</span>
+              </div>
+              <div class="coq-goal-target" id="target-subgoal-4" title="Click to open" style="color:#555500;">No open issues.</div>
+            </div>
+
+            <div id="view-insp-details" style="display: none;">
+              <div id="insp-meta-text" style="color: #000000; margin-bottom: 8px;"></div>
+
+              <div class="coq-subgoal-line"><span class="coq-subgoal-tag">(Structured details)</span></div>
+              <div id="insp-analysis-content" style="background:#f4f3ec; border:1px solid #c8c6bc; padding:6px; margin-bottom:8px; font-size:11px;">
+                <!-- Populated with available_info, plan, uncertainties -->
+              </div>
+
+              <div class="coq-subgoal-line"><span class="coq-subgoal-tag">(Input summary)</span></div>
+              <pre id="insp-input-content" style="white-space: pre-wrap; font-size:11px; margin-bottom:8px;"></pre>
+
+              <div class="coq-subgoal-line"><span class="coq-subgoal-tag">(Output summary)</span></div>
+              <pre id="insp-output-content" style="white-space: pre-wrap; font-size:11px;"></pre>
+            </div>
+
+            <div id="view-insp-falsifier" style="display: none;">
+              <div id="insp-falsifier-content" style="white-space: pre-wrap; color: #550000;">No review is available for this section.</div>
+            </div>
+
+            <div id="view-insp-verifier" style="display: none;">
+              <div id="insp-verifier-content" style="white-space: pre-wrap;">No verification result is available yet.</div>
+            </div>
+
+            <div id="view-insp-hmed" style="display: none;">
+              <div id="insp-hmed-content" style="white-space: pre-wrap;">No revision history is available yet.</div>
+            </div>
+
+            <div id="view-insp-knowledge" style="display: none;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <span style="font-weight: bold; font-size: 11px;">Reference notes</span>
+              </div>
+              <div id="insp-knowledge-content" style="white-space: pre-wrap; font-size: 11px; background: #faf9f5; border: 1px solid #dcdad0; padding: 6px; max-height: 240px; overflow-y: auto;">Nothing here yet. Notes from your runs will appear here as they are made; nothing is added in advance.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Resizer Vertical Divider -->
+        <div class="resizer-y" id="resizer-y"></div>
+
+        <!-- Bottom Pane: Messages & Interactive Event Log -->
+        <div class="sunken-frame" style="flex: 0.75;">
+          <div class="messages-toolbar">
+            <span><strong>Run log</strong></span>
+            <div style="display: flex; gap: 4px; align-items: center;">
+              <label>Search:</label>
+              <input type="text" id="log-search-input" placeholder="Search logs..." class="toolbar-select" style="height: 18px; padding: 0 4px; width: 110px; font-size: 11px;">
+              <label>Filter:</label>
+              <select id="log-filter-severity" class="toolbar-select" style="height: 18px; padding: 0 2px;">
+                <option value="all">All</option>
+                <option value="info">Info</option>
+                <option value="warning">Warnings</option>
+                <option value="error">Errors</option>
+              </select>
+              <button class="btn-tool" style="height: 18px; padding: 0 4px;" onclick="document.getElementById('event-log-stream').innerHTML=''">Clear</button>
+            </div>
+          </div>
+          <div class="coq-messages-pane" id="event-log-stream">
+            <div class="coq-msg-line">Mini-Colosseum is ready.</div>
+            <div class="coq-msg-line">Provider connections will appear here during a run.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Authentic Sunken Status Bar with Dual Budget Monitors -->
+    <div class="status-bar">
+      <div class="status-segment main" id="status-main-label">Ready</div>
+      <div class="status-segment" id="badge-problem" style="max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Ready</div>
+      <div class="status-segment" id="status-stage-label">Stage: READY</div>
+      <div class="status-segment" id="status-calls">Calls: 0</div>
+      <div class="status-segment" id="status-tokens">0k tok</div>
+      <div class="status-segment" id="status-meta-budget" title="Meta Model API (muse-wonder-1.0) Pool: $150 Limit">Meta: $0.00 / $150</div>
+      <div class="status-segment" id="status-baseten-budget" title="Baseten (muse-spark-open-1026) Pool: $100 Limit">Baseten: $0.00 / $100</div>
+      <div class="status-segment" id="status-cost" title="Active Run Budget and Hard Cap">SPEND: $0.00 / $50.00</div>
+      <div class="status-segment fireworks-status" id="fireworks-status"></div>
+    </div>
+
+    <!-- Permanent Transparency & Data-Sharing Notice (FR10) -->
+    <div class="disclaimer-bar">
+      <span>⚖ <strong>Permanent Notice:</strong> All proof verdicts &amp; objections are produced by AI model reviewers (Wonder 1.0 &amp; Spark Open), not by a formal interactive proof assistant. Credit-funded API calls are subject to Meta's developer data-sharing policy for model improvement.</span>
+    </div>
+  </div>
+
+  <!-- Modal: Problem Input & Conjecture Setup -->
+  <div class="modal-overlay" id="modal-run-setup">
+    <div class="modal-window" style="width: 580px;">
+      <div class="modal-header">
+        <span>Problem statement</span>
+        <button class="btn-close-modal" aria-label="Close dialog" onclick="window.app.closeModals()">&times;</button>
+      </div>
+      <div class="modal-content">
+        <div class="form-group">
+          <label class="form-label">Problem statement:</label>
+          <textarea class="form-input" id="input-problem" rows="6" style="width: 100%; font-family: var(--font-mono); font-size: 11px;" placeholder="Enter a problem in plain English, LaTeX, Markdown, or a mix."></textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Attach documents:</label>
+          <div id="attachment-drop-zone" class="attachment-drop-zone">
+            <input class="form-input" id="input-attachments" type="file" accept=".pdf,.doc,.docx,.tex" multiple>
+            <div class="form-help">Drop PDF, DOC, DOCX, or TEX files here, or choose files.</div>
+          </div>
+          <div id="attachment-list" class="attachment-list"></div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Budget cap (USD):</label>
+          <input class="form-input" id="input-run-budget-cap" type="number" min="0.5" step="0.5" value="50.00" placeholder="50.00">
+          <span class="form-help">Auto-stops when reached</span>
+        </div>
+        <div class="form-group" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 8px;">
+          <div>
+            <label class="form-label">Max Rounds:</label>
+            <input class="form-input" id="input-max-rounds" type="number" min="1" max="20" value="15">
+          </div>
+          <div>
+            <label class="form-label">Tree Widths:</label>
+            <input class="form-input" id="input-tree-widths" type="text" value="12, 8, 4, 1" placeholder="12, 8, 4, 1">
+          </div>
+          <div>
+            <label class="form-label">Sample / Rollout K:</label>
+            <input class="form-input" id="input-k-sample" type="number" min="2" max="8" value="4">
+          </div>
+          <span class="form-help">Auto-stops when reached</span>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-tool" onclick="window.app.saveProblemDraft()">Save Setup</button>
+        <button class="btn-tool primary-action" style="font-weight: bold;" onclick="window.app.handleRunAll()">Run Proof Engine</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Run History & Trace Replay -->
+  <div class="modal-overlay" id="modal-run-history">
+    <div class="modal-window" style="width: 650px;">
+      <div class="modal-header">
+        <span>Previous Runs</span>
+        <button class="btn-close-modal" aria-label="Close dialog" onclick="window.app.closeModals()">&times;</button>
+      </div>
+
+      <div class="modal-content">
+        <div style="font-size: 11px; margin-bottom: 6px;">
+          Select a previous run to view it again:
+        </div>
+        <div id="history-runs-list" style="max-height: 260px; overflow-y: auto; background: #ffffff; border: 1px solid #706e68;"></div>
+      </div>
+      <div class="modal-footer">
+        <input type="file" id="input-import-jsonl" accept=".jsonl" style="display:none;" onchange="window.app.handleFileImportJsonl(event)">
+        <button class="btn-tool" onclick="window.app.triggerImportJsonl()">Import a saved run</button>
+        <button class="btn-tool btn-close-modal" onclick="window.app.closeModals()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Cost Ledger -->
+  <div class="modal-overlay" id="modal-ledger">
+    <div class="modal-window ledger-window">
+      <div class="modal-header">
+        <span>Run Ledger</span>
+        <button class="btn-close-modal" aria-label="Close dialog" onclick="window.app.closeModals()">&times;</button>
+      </div>
+      <div class="ledger-summary" id="ledger-summary"></div>
+      <div class="ledger-toolbar">
+        <label><input type="checkbox" id="ledger-follow-latest" checked> Follow latest</label>
+      </div>
+      <div class="ledger-table-wrap">
+        <table class="ledger-table">
+          <thead>
+            <tr>
+              <th>Step #</th><th>Stage</th><th>Node</th><th>Model</th>
+              <th id="ledger-cost-header" class="cost-header">Cost (USD)</th><th>Share of run</th>
+            </tr>
+          </thead>
+          <tbody id="ledger-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: First-Run API Key Setup -->
+  <div class="modal-overlay locked-modal" id="modal-first-run-setup">
+    <div class="modal-window" style="width: 520px; border: 2px solid #2b579a;">
+      <div class="modal-header">
+        <span>Connect your model providers</span>
+        <button class="btn-close-modal" aria-label="Close dialog" onclick="window.app.closeModals()">&times;</button>
+      </div>
+      <div class="modal-content">
+        <div class="form-group" style="margin-bottom: 12px;">
+          <label class="form-label">Meta API Key:</label>
+          <div class="password-field">
+            <input class="form-input" id="setup-input-api-key" type="password" placeholder="Enter Meta API key">
+            <button type="button" class="eye-toggle" data-target="setup-input-api-key">Show</button>
+          </div>
+          <div id="setup-meta-error" class="field-error"></div>
+        </div>
+        <div class="form-group" style="margin-bottom: 12px;">
+          <label class="form-label">Baseten API Key: <i>(Optional)</i></label>
+          <div class="password-field">
+            <input class="form-input" id="setup-input-baseten-key" type="password" placeholder="Enter Baseten API key">
+            <button type="button" class="eye-toggle" data-target="setup-input-baseten-key">Show</button>
+          </div>
+          <div id="setup-baseten-error" class="field-error"></div>
+          <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 11px; margin-top: 6px;">
+            <input type="checkbox" id="setup-checkbox-baseten-fallback">
+            <span>Enable Baseten</span>
+          </label>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Fireworks API Key: <i>(Optional)</i></label>
+          <div class="password-field">
+            <input class="form-input" id="setup-input-fireworks-key" type="password" placeholder="Enter Fireworks API key">
+            <button type="button" class="eye-toggle" data-target="setup-input-fireworks-key">Show</button>
+          </div>
+          <div id="setup-fireworks-error" class="field-error"></div>
+          <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 11px; margin-top: 6px;">
+            <input type="checkbox" id="setup-checkbox-fireworks-fallback">
+            <span>Enable Fireworks</span>
+          </label>
+        </div>
+      </div>
+      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center;">
+        <button class="btn-tool" onclick="window.app.closeModals()">Cancel</button>
+        <button class="btn-tool" id="btn-save-first-run" style="font-weight: bold; background: #2b579a; color: #ffffff;" onclick="window.app.handleSaveFirstRunKeys()">Save &amp; Connect</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Settings & Preferences -->
+  <div class="modal-overlay" id="modal-settings">
+    <div class="modal-window" style="width: 560px; max-height: 85vh; display: flex; flex-direction: column;">
+      <div class="modal-header">
+        <span>Settings &amp; Model Routing</span>
+        <button class="btn-close-modal" aria-label="Close dialog" onclick="window.app.closeModals()">&times;</button>
+      </div>
+      <div class="modal-content" style="overflow-y: auto; padding-right: 8px;">
+        <!-- Provider Endpoints -->
+        <div style="margin-bottom: 12px; font-weight: bold; font-size: 11px; text-transform: uppercase; color: #2b579a; border-bottom: 1px solid #c8c6bc; padding-bottom: 4px;">Provider Endpoints</div>
+        <div class="form-group" style="margin-bottom: 8px;">
+          <label class="form-label">Meta API Key (leave blank to keep current):</label>
+          <input class="form-input" id="input-api-key" type="password" placeholder="Update Meta API key">
+        </div>
+        <div class="form-group" style="margin-bottom: 8px;">
+          <label class="form-label">Baseten API Key (leave blank to keep current):</label>
+          <input class="form-input" id="input-baseten-key" type="password" placeholder="Update Baseten API key">
+        </div>
+        <div class="form-group" style="margin-bottom: 8px;">
+          <label class="form-label">Meta Model API Base URL:</label>
+          <input class="form-input" id="input-base-url" type="text" placeholder="https://api.meta.ai/v1">
+        </div>
+        <div class="form-group" style="margin-bottom: 14px;">
+          <label class="form-label">Baseten API Base URL:</label>
+          <input class="form-input" id="input-baseten-url" type="text" placeholder="https://inference.baseten.co/v1">
+        </div>
+        <div class="form-group" style="margin-bottom: 14px;">
+          <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 11px;">
+            <input type="checkbox" id="input-baseten-fallback">
+            <strong>Try Baseten first (Meta fallback on failure)</strong>
+          </label>
+        </div>
+        <div class="form-group" style="margin-bottom: 8px;">
+          <label class="form-label">Fireworks API Key (leave blank to keep current):</label>
+          <input class="form-input" id="input-fireworks-key" type="password" placeholder="Update Fireworks API key">
+        </div>
+        <div class="form-group" style="margin-bottom: 14px;">
+          <label class="form-label">Fireworks API Base URL:</label>
+          <input class="form-input" id="input-fireworks-url" type="text" placeholder="https://api.fireworks.ai/inference/v1">
+        </div>
+        <div class="form-group" style="margin-bottom: 14px;">
+          <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 11px;">
+            <input type="checkbox" id="input-fireworks-fallback">
+            <strong>Try Fireworks first (Meta fallback on failure)</strong>
+          </label>
+        </div>
+
+        <!-- Runtime Defaults -->
+        <div style="margin-bottom: 12px; font-weight: bold; font-size: 11px; text-transform: uppercase; color: #2b579a; border-bottom: 1px solid #c8c6bc; padding-bottom: 4px;">Runtime Defaults</div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 14px;">
+          <div class="form-group">
+            <label class="form-label">Default Budget ($):</label>
+            <input class="form-input" id="input-budget-cap" type="number" step="0.5" min="0.5" placeholder="7.0">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Reasoning Effort:</label>
+            <select class="form-input" id="input-reasoning-effort">
+              <option value="" selected>Select…</option>
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Concurrency Limit:</label>
+            <input class="form-input" id="input-concurrency" type="number" min="1" max="10" placeholder="4">
+          </div>
+        </div>
+
+        <!-- Model Routing Configuration -->
+        <div style="margin-bottom: 12px; font-weight: bold; font-size: 11px; text-transform: uppercase; color: #2b579a; border-bottom: 1px solid #c8c6bc; padding-bottom: 4px;">Role Model Configuration</div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+          <div class="form-group">
+            <label class="form-label">Explorer Model (Spark):</label>
+            <input class="form-input" id="input-model-explorer" type="text" placeholder="muse-spark-1.3">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Solver Model (Spark):</label>
+            <input class="form-input" id="input-model-solver" type="text" placeholder="muse-spark-1.3">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Aggregator Model (Spark):</label>
+            <input class="form-input" id="input-model-aggregator" type="text" placeholder="muse-spark-1.3">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Decomposer Model (Wonder):</label>
+            <input class="form-input" id="input-model-decomposer" type="text" placeholder="muse-wonder-1.0">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Falsifier Model (Wonder):</label>
+            <input class="form-input" id="input-model-falsifier" type="text" placeholder="muse-wonder-1.0">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Global Verifier Model (Wonder):</label>
+            <input class="form-input" id="input-model-verifier" type="text" placeholder="muse-wonder-1.0">
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
+        <button class="btn-tool" onclick="window.app.closeModals()">Cancel</button>
+        <button class="btn-tool primary-action" style="font-weight: bold; background: #2b579a; color: #ffffff;" onclick="window.app.handleSaveSettings()">Save Settings</button>
+      </div>
+    </div>
+  </div>\n\n  <!-- Scripts -->
+  <script src="js/dagre_layout.js"></script>
+  <script src="js/graph_renderer.js"></script>
+  <script src="js/katex_simple.js"></script>
+  <script src="js/reducer.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

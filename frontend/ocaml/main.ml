@@ -136,26 +136,6 @@ let mount_workbench () =
   let preview_title = query "#preview-pane .pane-titlebar strong" in
   set_text preview_title "LaTeX Proof Viewer";
 
-  let proof_hero = make_element "article" "reference-proof-hero" "reference-proof-hero" in
-  let hero_kicker = make_element "p" "reference-proof-hero-kicker" "" in
-  let hero_title = make_element "h2" "reference-proof-hero-title" "" in
-  let hero_copy = make_element "p" "reference-proof-hero-copy" "" in
-  set_text hero_kicker "MINI-COLOSSEUM · RESEARCH WORKSPACE";
-  set_text hero_title "A question becomes a proof.";
-  set_text hero_copy "Follow each idea from exploration through review, revision, and verification.";
-  append proof_hero hero_kicker;
-  append proof_hero hero_title;
-  append proof_hero hero_copy;
-  append (query "#live-preview-content") proof_hero;
-  let sync_hero () =
-    let problem = String.trim (input_value "#toolbar-problem-title") in
-    set proof_hero "hidden" (Js.bool (problem <> ""))
-  in
-  let hero_callback = Js.wrap_callback (fun (_ : Dom_html.event Js.t) -> sync_hero (); Js._false) in
-  listen (query "#toolbar-problem-title") "input" hero_callback;
-  listen (query "#input-problem") "input" hero_callback;
-  sync_hero ();
-
   decorate_tablist ".tab-strip" "Proof views" [
     ("#tab-btn-tree", "tab-tree");
     ("#tab-btn-dag", "tab-dag");

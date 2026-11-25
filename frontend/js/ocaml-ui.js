@@ -24249,38 +24249,6 @@ h=a.jsoo_runtime,dF="caml_unix_stat_64",dE="unix_lseek",k="caml_unix_inchannel_o
          set_text(ledger_title, cst_Cost_Ledger);
          var preview_title = query("#preview-pane .pane-titlebar strong");
          set_text(preview_title, "LaTeX Proof Viewer");
-         c = "reference-proof-hero";
-         var
-          proof_hero = make_element("article", c, c),
-          c = "p",
-          hero_kicker = make_element(c, "reference-proof-hero-kicker", d),
-          hero_title = make_element("h2", "reference-proof-hero-title", d),
-          hero_copy = make_element(c, "reference-proof-hero-copy", d);
-         set_text(hero_kicker, "MINI-COLOSSEUM \xc2\xb7 RESEARCH WORKSPACE");
-         set_text(hero_title, "A question becomes a proof.");
-         set_text
-          (hero_copy,
-           "Follow each idea from exploration through review, revision, and verification.");
-         append(proof_hero, hero_kicker);
-         append(proof_hero, hero_title);
-         append(proof_hero, hero_copy);
-         append(query("#live-preview-content"), proof_hero);
-         var selector = "#toolbar-problem-title";
-         function sync_hero(a){
-          a = caml_string_of_jsstring(query(selector).value);
-          var
-           problem = Stdlib_String[24].call(null, a),
-           value = problem !== cst;
-          proof_hero.hidden = value;
-         }
-         var
-          hero_callback =
-            caml_js_wrap_callback
-             (function(param){sync_hero(0); return Js_of_ocaml_Js[8];}),
-          c = "input";
-         listen(query(selector), c, hero_callback);
-         listen(query("#input-problem"), c, hero_callback);
-         sync_hero(0);
          decorate_tablist(".tab-strip", "Proof views", a);
          decorate_tablist
           ("#reference-inspector-panel .subgoal-tabs-bar",

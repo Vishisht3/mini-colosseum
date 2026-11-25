@@ -254,47 +254,6 @@ body {
   white-space: pre-wrap;
 }
 
-.reference-proof-hero {
-  min-height: 250px;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  margin-top: 28px;
-  padding: 22px;
-  border-radius: 7px;
-  overflow: hidden;
-  background: linear-gradient(180deg, #07130dcc 0%, #0b1a13 42%, #07110e 100%);
-  color: #f4f0df;
-  box-shadow: 0 8px 24px #1e261d26;
-}
-
-.reference-proof-hero[hidden] {
-  display: none;
-}
-
-.reference-proof-hero-kicker {
-  margin-bottom: 8px;
-  color: #d1b57a;
-  font: 700 10px var(--font-ui);
-  letter-spacing: 0.14em;
-}
-
-.reference-proof-hero-title {
-  max-width: 16ch;
-  margin: 0 0 7px;
-  color: #fbf8ee;
-  font: 400 clamp(21px, 2vw, 30px) Georgia, "Times New Roman", serif;
-  line-height: 1.12;
-}
-
-.reference-proof-hero-copy {
-  max-width: 39ch;
-  margin: 0;
-  color: #e8e3d4;
-  font-size: 12px;
-  line-height: 1.55;
-}
-
 .reference-transparency {
   order: 1;
   padding: 7px 11px;
@@ -786,28 +745,6 @@ body {
   .reference-proof-surface .preview-content {
     padding: 14px 16px;
     font-size: 13px;
-  }
-
-  .reference-proof-hero {
-    min-height: 50px;
-    margin-top: 6px;
-    padding: 4px 8px;
-  }
-
-  .reference-proof-hero-kicker {
-    margin-bottom: 2px;
-    font-size: 6px;
-  }
-
-  .reference-proof-hero-title {
-    max-width: none;
-    margin: 0;
-    font-size: 13px;
-    line-height: 1.05;
-  }
-
-  .reference-proof-hero-copy {
-    display: none;
   }
 
   .reference-dock-header {
